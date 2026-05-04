@@ -1,0 +1,24 @@
+{
+  "ticker": "RDW",
+  "thesis": "Space infrastructure demand inflects as backlog converts into revenue and margins improve.",
+  "horizon": "6-18 months",
+  "risk": "high",
+  "kpis": {
+    "backlog_growth": "28%",
+    "net_debt_to_ebitda": "1.8",
+    "book_to_bill": "1.2x"
+  },
+  "catalysts": [
+    "next earnings report",
+    "NASA / defense contract awards",
+    "updated margin guidance"
+  ],
+  "risks": [
+    "dilution risk",
+    "program delays",
+    "gross margin execution"
+  ],
+  "notes": [
+    "Use this as a template for a first-pass ticker diligence note. Replace sample data before relying on it."
+  ]
+}
