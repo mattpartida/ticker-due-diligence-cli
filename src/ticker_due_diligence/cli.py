@@ -5,7 +5,7 @@ import json
 import sys
 from pathlib import Path
 
-from .engine import build_note, load_inputs, score_profile
+from .engine import build_note, load_inputs, score_profile, validate_input
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -38,6 +38,11 @@ def build_parser() -> argparse.ArgumentParser:
         default="markdown",
         help="Print markdown note or JSON profile summary to stdout.",
     )
+    parser.add_argument(
+        "--validate-only",
+        action="store_true",
+        help="Print a JSON input-quality report and exit non-zero when blocking errors exist.",
+    )
     return parser
 
 
@@ -50,6 +55,12 @@ def main(argv: list[str] | None = None) -> int:
             financials_path=args.financials,
             ticker=args.ticker,
         )
+        if args.validate_only:
+            issues = [issue.to_dict() for issue in validate_input(data)]
+            has_errors = any(issue["severity"] == "error" for issue in issues)
+            payload = {"ticker": data.ticker, "has_errors": has_errors, "issues": issues}
+            print(json.dumps(payload, indent=2, sort_keys=True))
+            return 1 if has_errors else 0
         note = build_note(data)
         if args.output:
             args.output.parent.mkdir(parents=True, exist_ok=True)

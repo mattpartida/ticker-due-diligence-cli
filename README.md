@@ -12,6 +12,7 @@ It is designed for fast first-pass stock work: capture the thesis, financial tre
 - Highlights leading indicators, strengths, concerns, watch items, catalysts, and invalidation risks.
 - Writes a Markdown research note.
 - Can print a machine-readable JSON score profile.
+- Can validate input quality and return structured issues before note generation.
 
 ## Install locally
 
@@ -48,6 +49,16 @@ ticker-dd \
   --output RDW-note.md \
   --format json
 ```
+
+Validate input quality without writing a note:
+
+```bash
+ticker-dd --input examples/rdw.json --financials examples/rdw-financials.csv --validate-only
+```
+
+`--validate-only` prints JSON with `ticker`, `has_errors`, and structured `issues` entries containing `severity`, `path`, and `message`. Blocking errors return exit code `1`; warning-only reports return `0`.
+
+See [`docs/roadmap.md`](docs/roadmap.md) for the shipped input-quality phase and planned next phases.
 
 ## JSON input shape
 

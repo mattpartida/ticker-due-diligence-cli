@@ -33,3 +33,7 @@ jobs:
             --output /tmp/RDW-note.md \
             --format json
           test -s /tmp/RDW-note.md
+          PYTHONPATH=src python -m ticker_due_diligence.cli \
+            --input examples/rdw.json \
+            --financials examples/rdw-financials.csv \
+            --validate-only

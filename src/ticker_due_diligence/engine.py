@@ -22,6 +22,16 @@ class DiligenceInput:
 
 
 @dataclass
+class InputQualityIssue:
+    severity: str
+    path: str
+    message: str
+
+    def to_dict(self) -> dict[str, str]:
+        return asdict(self)
+
+
+@dataclass
 class DiligenceProfile:
     ticker: str
     overall_score: int
@@ -32,6 +42,7 @@ class DiligenceProfile:
     watch_items: list[str]
     leading_indicators: list[str]
     questions: list[str]
+    input_quality_issues: list[dict[str, str]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -100,6 +111,64 @@ def load_inputs(
         risks=[str(item) for item in payload.get("risks") or []],
         notes=[str(item) for item in payload.get("notes") or []],
     )
+
+
+def validate_input(data: DiligenceInput) -> list[InputQualityIssue]:
+    issues: list[InputQualityIssue] = []
+    if not data.thesis.strip():
+        issues.append(
+            InputQualityIssue(
+                severity="error",
+                path="thesis",
+                message="Add a concise thesis before relying on the diligence note.",
+            )
+        )
+    if len(data.financials) < 2:
+        issues.append(
+            InputQualityIssue(
+                severity="warning",
+                path="financials",
+                message="Provide at least two financial periods for trend scoring.",
+            )
+        )
+    for index, row in enumerate(data.financials):
+        for field_name in ["period", "revenue", "gross_margin", "fcf"]:
+            if row.get(field_name) in (None, ""):
+                issues.append(
+                    InputQualityIssue(
+                        severity="warning",
+                        path=f"financials[{index}].{field_name}",
+                        message=f"Add {field_name.replace('_', ' ')} for this financial period.",
+                    )
+                )
+    if not data.kpis:
+        issues.append(
+            InputQualityIssue(
+                severity="warning",
+                path="kpis",
+                message=(
+                    "Add thesis-specific leading KPIs such as backlog, bookings, churn, "
+                    "or guidance."
+                ),
+            )
+        )
+    if not data.catalysts:
+        issues.append(
+            InputQualityIssue(
+                severity="warning",
+                path="catalysts",
+                message="Add at least one catalyst or forcing event to watch.",
+            )
+        )
+    if not data.risks:
+        issues.append(
+            InputQualityIssue(
+                severity="warning",
+                path="risks",
+                message="Add thesis invalidation risks before relying on the note.",
+            )
+        )
+    return issues
 
 
 def _latest_two(
@@ -220,6 +289,7 @@ def score_profile(data: DiligenceInput) -> DiligenceProfile:
         "What is the next forcing event and expected date?",
         "What data point would invalidate the thesis fastest?",
     ]
+    quality_issues = [issue.to_dict() for issue in validate_input(data)]
     bounded = max(0, min(100, round(score)))
     return DiligenceProfile(
         ticker=data.ticker.upper(),
@@ -231,11 +301,18 @@ def score_profile(data: DiligenceInput) -> DiligenceProfile:
         watch_items=watch_items or ["Track the next earnings release and updated guidance"],
         leading_indicators=leading or ["No leading indicators supplied"],
         questions=questions,
+        input_quality_issues=quality_issues,
     )
 
 
 def _bullet(items: list[str]) -> str:
     return "\n".join(f"- {item}" for item in items)
+
+
+def _quality_bullets(issues: list[dict[str, str]]) -> list[str]:
+    if not issues:
+        return ["No blocking input quality issues detected"]
+    return [f"[{issue['severity']}] {issue['path']}: {issue['message']}" for issue in issues]
 
 
 def build_note(data: DiligenceInput) -> str:
@@ -254,6 +331,9 @@ def build_note(data: DiligenceInput) -> str:
         "",
         "## Scorecard",
         f"Overall score: {profile.overall_score}/100",
+        "",
+        "## Input quality",
+        _bullet(_quality_bullets(profile.input_quality_issues)),
         "",
         "### Strengths",
         _bullet(profile.strengths),

@@ -13,6 +13,7 @@ from ticker_due_diligence.engine import (
     load_inputs,
     parse_financials_csv,
     score_profile,
+    validate_input,
 )
 
 
@@ -121,6 +122,48 @@ class TickerDueDiligenceTests(unittest.TestCase):
         self.assertEqual(len(loaded.financials), 2)
         self.assertEqual(loaded.financials[1]["gross_margin"], 0.42)
 
+    def test_validate_input_reports_blocking_and_warning_issues(self):
+        data = DiligenceInput(
+            ticker="MISS",
+            thesis="",
+            financials=[{"period": "2024", "revenue": 100.0}],
+            kpis={},
+            catalysts=[],
+            risks=[],
+        )
+
+        issues = validate_input(data)
+        issue_dicts = [issue.to_dict() for issue in issues]
+
+        self.assertIn(
+            {
+                "severity": "error",
+                "path": "thesis",
+                "message": "Add a concise thesis before relying on the diligence note.",
+            },
+            issue_dicts,
+        )
+        self.assertIn(
+            {
+                "severity": "warning",
+                "path": "financials",
+                "message": "Provide at least two financial periods for trend scoring.",
+            },
+            issue_dicts,
+        )
+        self.assertTrue(any(issue["path"] == "kpis" for issue in issue_dicts))
+
+    def test_score_profile_and_markdown_include_input_quality_issues(self):
+        data = DiligenceInput(ticker="MISS", thesis="", financials=[], kpis={})
+
+        profile = score_profile(data)
+        note = build_note(data)
+
+        self.assertTrue(profile.input_quality_issues)
+        self.assertIn("input_quality_issues", profile.to_dict())
+        self.assertIn("## Input quality", note)
+        self.assertIn("[error] thesis", note)
+
     def test_cli_generates_markdown_and_json(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -134,10 +177,12 @@ class TickerDueDiligenceTests(unittest.TestCase):
                         "horizon": "weeks",
                         "risk": "low",
                         "financials": [
-                            {"period": "2023", "revenue": 100, "gross_margin": 0.4},
-                            {"period": "2024", "revenue": 105, "gross_margin": 0.45},
+                            {"period": "2023", "revenue": 100, "gross_margin": 0.4, "fcf": 1},
+                            {"period": "2024", "revenue": 105, "gross_margin": 0.45, "fcf": 2},
                         ],
+                        "kpis": {"book_to_bill": "1.2x"},
                         "catalysts": ["product launch"],
+                        "risks": ["launch slips"],
                     }
                 )
             )
@@ -164,8 +209,37 @@ class TickerDueDiligenceTests(unittest.TestCase):
             payload = json.loads(result.stdout)
 
             self.assertEqual(payload["ticker"], "CLI")
+            self.assertEqual(payload["input_quality_issues"], [])
             self.assertTrue(output_path.exists())
             self.assertIn("# CLI Due Diligence Note", output_path.read_text())
+
+    def test_cli_validate_only_returns_machine_readable_quality_report(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            input_path = root / "input.json"
+            input_path.write_text(json.dumps({"ticker": "BAD", "financials": []}))
+
+            env = os.environ.copy()
+            env["PYTHONPATH"] = str(Path(__file__).resolve().parents[1] / "src")
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "ticker_due_diligence.cli",
+                    "--input",
+                    str(input_path),
+                    "--validate-only",
+                ],
+                text=True,
+                capture_output=True,
+                env=env,
+            )
+            payload = json.loads(result.stdout)
+
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(payload["ticker"], "BAD")
+        self.assertTrue(payload["has_errors"])
+        self.assertTrue(any(issue["severity"] == "error" for issue in payload["issues"]))
 
 
 if __name__ == "__main__":
