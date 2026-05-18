@@ -18,16 +18,17 @@ This roadmap keeps the CLI focused on fast, local-first ticker diligence. Each p
 
 ## Phase 2 — Comparable company context
 
-**Status:** Planned
+**Status:** Shipped
 
 **Goal:** Let users add a small local peer table so the note can flag relative growth, margin, leverage, and valuation context without fetching live market data.
 
-**Acceptance criteria:**
+**Shipped scope:**
 
-- Accept a local peers CSV or inline JSON peer list.
-- Normalize common peer metrics and report missing columns clearly.
-- Add a peer-context section to Markdown and JSON outputs.
-- Include examples and tests for high-growth/high-leverage and margin-lagging cases.
+- Added inline JSON peer support and `--peers` CSV loading for local comparable-company tables.
+- Normalized common peer metrics including `revenue_growth`, `gross_margin`, `net_debt_to_ebitda`, and `ev_to_sales`.
+- Added peer missing-column warnings through the existing input quality report.
+- Added peer-context summaries to JSON profiles and Markdown notes.
+- Added example peer data and tests for high-growth, margin-lagging, high-leverage, and missing-valuation cases.
 
 ## Phase 3 — Catalyst calendar and forcing-event tracking
 

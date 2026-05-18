@@ -28,6 +28,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="CSV financial history to merge into the input.",
     )
     parser.add_argument(
+        "--peers",
+        type=Path,
+        help="CSV comparable-company peer table to merge into the input.",
+    )
+    parser.add_argument(
         "--output",
         type=Path,
         help="Markdown output path. Defaults to stdout for markdown.",
@@ -53,6 +58,7 @@ def main(argv: list[str] | None = None) -> int:
         data = load_inputs(
             json_path=args.input,
             financials_path=args.financials,
+            peers_path=args.peers,
             ticker=args.ticker,
         )
         if args.validate_only:

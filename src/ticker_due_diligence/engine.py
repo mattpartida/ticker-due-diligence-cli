@@ -19,6 +19,7 @@ class DiligenceInput:
     catalysts: list[str] = field(default_factory=list)
     risks: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
+    peers: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
@@ -43,6 +44,7 @@ class DiligenceProfile:
     leading_indicators: list[str]
     questions: list[str]
     input_quality_issues: list[dict[str, str]] = field(default_factory=list)
+    peer_context: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -85,10 +87,38 @@ def parse_financials_csv(path: str | Path) -> list[dict[str, Any]]:
     return rows
 
 
+def _normalize_peer(peer: dict[str, Any]) -> dict[str, Any]:
+    normalized: dict[str, Any] = {}
+    for key, value in peer.items():
+        if key is None:
+            continue
+        normalized_key = str(key).strip().lower().replace(" ", "_")
+        if normalized_key == "ticker" and value not in (None, ""):
+            normalized[normalized_key] = str(value).strip().upper()
+        else:
+            normalized[normalized_key] = _as_number(value)
+    return normalized
+
+
+def parse_peers_csv(path: str | Path) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    with Path(path).open(newline="") as f:
+        reader = csv.DictReader(f)
+        for raw in reader:
+            peer = {key: value for key, value in raw.items() if key is not None}
+            rows.append(_normalize_peer(peer))
+    return rows
+
+
+def _normalize_peers(peers: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [_normalize_peer(peer) for peer in peers]
+
+
 def load_inputs(
     *,
     json_path: str | Path | None = None,
     financials_path: str | Path | None = None,
+    peers_path: str | Path | None = None,
     ticker: str | None = None,
 ) -> DiligenceInput:
     payload: dict[str, Any] = {}
@@ -96,6 +126,8 @@ def load_inputs(
         payload = json.loads(Path(json_path).read_text())
     if financials_path:
         payload["financials"] = parse_financials_csv(financials_path)
+    if peers_path:
+        payload["peers"] = parse_peers_csv(peers_path)
     if ticker:
         payload["ticker"] = ticker
     if not payload.get("ticker"):
@@ -110,6 +142,7 @@ def load_inputs(
         catalysts=[str(item) for item in payload.get("catalysts") or []],
         risks=[str(item) for item in payload.get("risks") or []],
         notes=[str(item) for item in payload.get("notes") or []],
+        peers=_normalize_peers(list(payload.get("peers") or [])),
     )
 
 
@@ -168,6 +201,31 @@ def validate_input(data: DiligenceInput) -> list[InputQualityIssue]:
                 message="Add thesis invalidation risks before relying on the note.",
             )
         )
+    for index, peer in enumerate(data.peers):
+        if peer.get("ticker") in (None, ""):
+            issues.append(
+                InputQualityIssue(
+                    severity="warning",
+                    path=f"peers[{index}].ticker",
+                    message="Add ticker for this peer row.",
+                )
+            )
+        if peer.get("revenue_growth") in (None, ""):
+            issues.append(
+                InputQualityIssue(
+                    severity="warning",
+                    path=f"peers[{index}].revenue_growth",
+                    message="Add revenue growth for this peer to compare relative growth.",
+                )
+            )
+        if peer.get("gross_margin") in (None, ""):
+            issues.append(
+                InputQualityIssue(
+                    severity="warning",
+                    path=f"peers[{index}].gross_margin",
+                    message="Add gross margin for this peer to compare profitability.",
+                )
+            )
     return issues
 
 
@@ -192,6 +250,69 @@ def _pct_change(old: float | None, new: float | None) -> float | None:
     if old is None or new is None or old == 0:
         return None
     return (new - old) / abs(old)
+
+
+def _median(values: list[float]) -> float | None:
+    if not values:
+        return None
+    ordered = sorted(values)
+    midpoint = len(ordered) // 2
+    if len(ordered) % 2:
+        return ordered[midpoint]
+    return (ordered[midpoint - 1] + ordered[midpoint]) / 2
+
+
+def _peer_numbers(peers: list[dict[str, Any]], key: str) -> list[float]:
+    return [float(peer[key]) for peer in peers if isinstance(peer.get(key), (int, float))]
+
+
+def build_peer_context(
+    data: DiligenceInput,
+    revenue_growth: float | None,
+    latest_margin: float | None,
+) -> list[str]:
+    if not data.peers:
+        return ["No peers supplied"]
+    context: list[str] = []
+    revenue_median = _median(_peer_numbers(data.peers, "revenue_growth"))
+    if revenue_growth is not None and revenue_median is not None:
+        if revenue_growth >= revenue_median:
+            context.append(
+                "Revenue growth is above peer median "
+                f"({revenue_growth:.1%} vs {revenue_median:.1%})"
+            )
+        else:
+            context.append(
+                f"Revenue growth trails peer median ({revenue_growth:.1%} vs {revenue_median:.1%})"
+            )
+    margin_median = _median(_peer_numbers(data.peers, "gross_margin"))
+    if latest_margin is not None and margin_median is not None:
+        if latest_margin >= margin_median:
+            context.append(
+                f"Gross margin is above peer median ({latest_margin:.1%} vs {margin_median:.1%})"
+            )
+        else:
+            context.append(
+                f"Gross margin trails peer median ({latest_margin:.1%} vs {margin_median:.1%})"
+            )
+    leverage_values = _peer_numbers(data.peers, "net_debt_to_ebitda")
+    if leverage_values:
+        worst = max(leverage_values)
+        worst_peer = next(
+            (
+                str(peer.get("ticker", "peer"))
+                for peer in data.peers
+                if peer.get("net_debt_to_ebitda") == worst
+            ),
+            "peer",
+        )
+        if worst > 3.0:
+            context.append(f"{worst_peer} screens as high leverage at {worst:g}x net debt / EBITDA")
+    for peer in data.peers:
+        ticker = str(peer.get("ticker", "Peer"))
+        if peer.get("ev_to_sales") in (None, ""):
+            context.append(f"{ticker} missing valuation metric ev_to_sales")
+    return context or ["Peer table supplied but no comparable metrics could be summarized"]
 
 
 def _extract_number(value: Any) -> float | None:
@@ -290,6 +411,7 @@ def score_profile(data: DiligenceInput) -> DiligenceProfile:
         "What data point would invalidate the thesis fastest?",
     ]
     quality_issues = [issue.to_dict() for issue in validate_input(data)]
+    peer_context = build_peer_context(data, revenue_growth, new_margin)
     bounded = max(0, min(100, round(score)))
     return DiligenceProfile(
         ticker=data.ticker.upper(),
@@ -302,6 +424,7 @@ def score_profile(data: DiligenceInput) -> DiligenceProfile:
         leading_indicators=leading or ["No leading indicators supplied"],
         questions=questions,
         input_quality_issues=quality_issues,
+        peer_context=peer_context,
     )
 
 
@@ -343,6 +466,9 @@ def build_note(data: DiligenceInput) -> str:
         "",
         "## Leading indicators",
         _bullet(profile.leading_indicators),
+        "",
+        "## Peer context",
+        _bullet(profile.peer_context),
         "",
         "## Catalysts",
         _bullet(catalysts),

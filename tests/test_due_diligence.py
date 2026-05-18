@@ -12,6 +12,7 @@ from ticker_due_diligence.engine import (
     build_note,
     load_inputs,
     parse_financials_csv,
+    parse_peers_csv,
     score_profile,
     validate_input,
 )
@@ -121,6 +122,168 @@ class TickerDueDiligenceTests(unittest.TestCase):
         self.assertEqual(loaded.ticker, "XYZ")
         self.assertEqual(len(loaded.financials), 2)
         self.assertEqual(loaded.financials[1]["gross_margin"], 0.42)
+
+    def test_parse_peers_csv_normalizes_common_metrics(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "peers.csv"
+            path.write_text(
+                "ticker,revenue_growth,gross_margin,net_debt_to_ebitda,ev_to_sales\n"
+                "RKLB,42%,28%,1.2,8.4\n"
+            )
+
+            peers = parse_peers_csv(path)
+
+        self.assertEqual(
+            peers,
+            [
+                {
+                    "ticker": "RKLB",
+                    "revenue_growth": 0.42,
+                    "gross_margin": 0.28,
+                    "net_debt_to_ebitda": 1.2,
+                    "ev_to_sales": 8.4,
+                }
+            ],
+        )
+
+    def test_score_profile_and_markdown_include_peer_context(self):
+        data = DiligenceInput(
+            ticker="RDW",
+            thesis="Space infrastructure demand inflects as backlog converts.",
+            horizon="6-18 months",
+            risk="high",
+            financials=[
+                {"period": "2023", "revenue": 100.0, "gross_margin": 0.30, "fcf": -10.0},
+                {"period": "2024", "revenue": 140.0, "gross_margin": 0.35, "fcf": 2.0},
+            ],
+            kpis={"backlog_growth": "28%"},
+            catalysts=["earnings"],
+            risks=["dilution"],
+            peers=[
+                {
+                    "ticker": "RKLB",
+                    "revenue_growth": 0.42,
+                    "gross_margin": 0.28,
+                    "net_debt_to_ebitda": 1.2,
+                },
+                {
+                    "ticker": "BKSY",
+                    "revenue_growth": 0.10,
+                    "gross_margin": 0.48,
+                    "net_debt_to_ebitda": 4.2,
+                },
+            ],
+        )
+
+        profile = score_profile(data)
+        note = build_note(data)
+
+        self.assertIn("peer_context", profile.to_dict())
+        self.assertTrue(any("above peer median" in item for item in profile.peer_context))
+        self.assertTrue(any("margin trails peer median" in item for item in profile.peer_context))
+        self.assertTrue(
+            any("BKSY missing valuation metric" in item for item in profile.peer_context)
+        )
+        self.assertIn("## Peer context", note)
+        self.assertIn("Revenue growth is above peer median", note)
+
+    def test_load_inputs_accepts_inline_and_csv_peers(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            json_path = root / "input.json"
+            peers_path = root / "peers.csv"
+            json_path.write_text(
+                json.dumps(
+                    {
+                        "ticker": "XYZ",
+                        "thesis": "Peer gap closes as execution improves.",
+                        "peers": [{"ticker": "AAA", "revenue_growth": "12%"}],
+                    }
+                )
+            )
+            peers_path.write_text("ticker,revenue_growth,gross_margin\nBBB,25%,44%\n")
+
+            inline_loaded = load_inputs(json_path=json_path)
+            csv_loaded = load_inputs(json_path=json_path, peers_path=peers_path)
+
+        self.assertEqual(inline_loaded.peers[0]["revenue_growth"], 0.12)
+        self.assertEqual(csv_loaded.peers[0]["ticker"], "BBB")
+        self.assertEqual(csv_loaded.peers[0]["gross_margin"], 0.44)
+
+    def test_validate_input_reports_peer_missing_columns(self):
+        data = DiligenceInput(
+            ticker="MISS",
+            thesis="Peer context matters.",
+            peers=[{"ticker": "AAA", "gross_margin": 0.4}, {"revenue_growth": 0.2}],
+        )
+
+        issue_dicts = [issue.to_dict() for issue in validate_input(data)]
+
+        self.assertIn(
+            {
+                "severity": "warning",
+                "path": "peers[0].revenue_growth",
+                "message": "Add revenue growth for this peer to compare relative growth.",
+            },
+            issue_dicts,
+        )
+        self.assertIn(
+            {
+                "severity": "warning",
+                "path": "peers[1].ticker",
+                "message": "Add ticker for this peer row.",
+            },
+            issue_dicts,
+        )
+
+    def test_cli_accepts_peers_csv_and_prints_peer_context(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            input_path = root / "input.json"
+            peers_path = root / "peers.csv"
+            input_path.write_text(
+                json.dumps(
+                    {
+                        "ticker": "CLI",
+                        "thesis": "CLI peer context test.",
+                        "financials": [
+                            {"period": "2023", "revenue": 100, "gross_margin": 0.35, "fcf": 1},
+                            {"period": "2024", "revenue": 130, "gross_margin": 0.40, "fcf": 3},
+                        ],
+                        "kpis": {"book_to_bill": "1.2x"},
+                        "catalysts": ["earnings"],
+                        "risks": ["execution"],
+                    }
+                )
+            )
+            peers_path.write_text(
+                "ticker,revenue_growth,gross_margin,net_debt_to_ebitda,ev_to_sales\n"
+                "PEER,15%,45%,2.0,5.5\n"
+            )
+            env = os.environ.copy()
+            env["PYTHONPATH"] = str(Path(__file__).resolve().parents[1] / "src")
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "ticker_due_diligence.cli",
+                    "--input",
+                    str(input_path),
+                    "--peers",
+                    str(peers_path),
+                    "--format",
+                    "json",
+                ],
+                text=True,
+                capture_output=True,
+                check=True,
+                env=env,
+            )
+            payload = json.loads(result.stdout)
+
+        self.assertTrue(payload["peer_context"])
+        self.assertTrue(any("peer median" in item for item in payload["peer_context"]))
 
     def test_validate_input_reports_blocking_and_warning_issues(self):
         data = DiligenceInput(

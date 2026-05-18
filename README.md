@@ -8,6 +8,7 @@ It is designed for fast first-pass stock work: capture the thesis, financial tre
 
 - Reads a JSON research input file.
 - Optionally merges a CSV financial history file.
+- Optionally merges a local peer-comparison CSV or inline JSON peer list.
 - Scores the setup from 0-100 using simple transparent heuristics.
 - Highlights leading indicators, strengths, concerns, watch items, catalysts, and invalidation risks.
 - Writes a Markdown research note.
@@ -46,8 +47,15 @@ Merge separate financials CSV and print JSON profile:
 ticker-dd \
   --input examples/rdw.json \
   --financials examples/rdw-financials.csv \
+  --peers examples/rdw-peers.csv \
   --output RDW-note.md \
   --format json
+```
+
+Add comparable-company context from a local peer table:
+
+```bash
+ticker-dd --input examples/rdw.json --peers examples/rdw-peers.csv --format json
 ```
 
 Validate input quality without writing a note:
@@ -88,6 +96,16 @@ period,revenue,gross_margin,fcf
 ```
 
 Supported numeric formats include `1,250.5`, `18%`, `$42`, and negative values.
+
+## Peer CSV shape
+
+```csv
+ticker,revenue_growth,gross_margin,net_debt_to_ebitda,ev_to_sales
+RKLB,42%,28%,1.2,8.4
+BKSY,10%,48%,4.2,
+```
+
+You can include `peers` inline in JSON or provide `--peers` as CSV. Peer rows are local user-supplied comparable-company context; the CLI does not fetch live market data.
 
 ## Output philosophy
 
