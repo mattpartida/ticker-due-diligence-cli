@@ -731,3 +731,88 @@ def build_note(data: DiligenceInput) -> str:
         ]
     )
     return "\n".join(parts)
+
+
+def _risk_rank(risk: str) -> int:
+    normalized = risk.strip().lower()
+    return {"low": 0, "medium": 1, "med": 1, "high": 2}.get(normalized, 3)
+
+
+def build_watchlist(input_dir: str | Path) -> dict[str, Any]:
+    root = Path(input_dir)
+    if not root.is_dir():
+        raise ValueError(f"batch directory does not exist: {root}")
+    rows: list[dict[str, Any]] = []
+    failures: list[dict[str, str]] = []
+    files = sorted(root.glob("*.json"))
+    for path in files:
+        try:
+            data = load_inputs(json_path=path)
+            profile = score_profile(data)
+        except Exception as exc:  # noqa: BLE001 - partial batch failures should be reported.
+            failures.append({"file": path.name, "error": str(exc)})
+            continue
+        issue_count = len(profile.input_quality_issues)
+        rows.append(
+            {
+                "ticker": profile.ticker,
+                "score": profile.overall_score,
+                "risk": profile.risk,
+                "horizon": profile.horizon,
+                "issue_count": issue_count,
+                "top_watch_item": profile.watch_items[0] if profile.watch_items else "",
+                "input_file": str(path),
+            }
+        )
+    rows.sort(key=lambda row: (-int(row["score"]), _risk_rank(str(row["risk"])), row["ticker"]))
+    ranked_rows = [{"rank": index, **row} for index, row in enumerate(rows, start=1)]
+    return {
+        "summary": {
+            "input_dir": str(root),
+            "total_files": len(files),
+            "valid_tickers": len(ranked_rows),
+            "failed_files": len(failures),
+        },
+        "watchlist": ranked_rows,
+        "failures": failures,
+    }
+
+
+def build_watchlist_markdown(batch: dict[str, Any]) -> str:
+    summary = batch["summary"]
+    rows = batch.get("watchlist", [])
+    failures = batch.get("failures", [])
+    lines = [
+        "# Ticker Watchlist Summary",
+        "",
+        f"Input directory: {summary['input_dir']}",
+        f"Valid tickers: {summary['valid_tickers']} / {summary['total_files']}",
+        f"Failed files: {summary['failed_files']}",
+        "",
+        "| Rank | Ticker | Score | Risk | Horizon | Issues |",
+        "| --- | --- | ---: | --- | --- | ---: |",
+    ]
+    if rows:
+        for row in rows:
+            lines.append(
+                "| "
+                + " | ".join(
+                    [
+                        str(row["rank"]),
+                        _markdown_cell(str(row["ticker"])),
+                        str(row["score"]),
+                        _markdown_cell(str(row["risk"])),
+                        _markdown_cell(str(row["horizon"])),
+                        str(row["issue_count"]),
+                    ]
+                )
+                + " |"
+            )
+    else:
+        lines.append("| — | No valid tickers | — | — | — | — |")
+    if failures:
+        lines.extend(["", "## Partial failures", ""])
+        for failure in failures:
+            lines.append(f"- {failure['file']}: {failure['error']}")
+    lines.append("")
+    return "\n".join(lines)

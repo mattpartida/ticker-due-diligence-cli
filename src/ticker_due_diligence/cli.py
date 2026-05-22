@@ -5,7 +5,14 @@ import json
 import sys
 from pathlib import Path
 
-from .engine import build_note, load_inputs, score_profile, validate_input
+from .engine import (
+    build_note,
+    build_watchlist,
+    build_watchlist_markdown,
+    load_inputs,
+    score_profile,
+    validate_input,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -21,6 +28,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--input",
         type=Path,
         help="JSON input file with thesis/KPIs/catalysts/risks.",
+    )
+    parser.add_argument(
+        "--batch-dir",
+        type=Path,
+        help="Directory of ticker JSON input files to score into a ranked watchlist.",
+    )
+    parser.add_argument(
+        "--notes-dir",
+        type=Path,
+        help="When used with --batch-dir, write one Markdown note per valid ticker.",
     )
     parser.add_argument(
         "--financials",
@@ -55,6 +72,23 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
+        if args.batch_dir:
+            batch = build_watchlist(args.batch_dir)
+            if args.notes_dir:
+                args.notes_dir.mkdir(parents=True, exist_ok=True)
+                for row in batch["watchlist"]:
+                    data = load_inputs(json_path=row["input_file"])
+                    (args.notes_dir / f"{row['ticker']}.md").write_text(build_note(data))
+            if args.format == "json":
+                print(json.dumps(batch, indent=2, sort_keys=True))
+            else:
+                markdown = build_watchlist_markdown(batch)
+                if args.output:
+                    args.output.parent.mkdir(parents=True, exist_ok=True)
+                    args.output.write_text(markdown)
+                else:
+                    print(markdown)
+            return 0
         data = load_inputs(
             json_path=args.input,
             financials_path=args.financials,

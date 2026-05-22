@@ -1,0 +1,19 @@
+{
+  "ticker": "RDW",
+  "thesis": "Space infrastructure demand inflects as backlog converts into revenue and margins improve.",
+  "horizon": "6-18 months",
+  "risk": "high",
+  "financials": [
+    {"period": "2023", "revenue": 100, "gross_margin": 0.35, "fcf": -10},
+    {"period": "2024", "revenue": 140, "gross_margin": 0.42, "fcf": 5}
+  ],
+  "kpis": {"backlog_growth": "28%"},
+  "catalysts": ["next earnings report"],
+  "risks": ["dilution risk"],
+  "sources": [{"id": "memo", "title": "Internal diligence memo"}],
+  "evidence": {
+    "kpis.backlog_growth": ["memo"],
+    "catalysts[0]": ["memo"],
+    "risks[0]": ["memo"]
+  }
+}

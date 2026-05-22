@@ -59,13 +59,14 @@ This roadmap keeps the CLI focused on fast, local-first ticker diligence. Each p
 
 ## Phase 5 — Batch watchlist scoring
 
-**Status:** Planned
+**Status:** Shipped
 
 **Goal:** Run the same diligence heuristic across multiple local ticker inputs and produce a ranked watchlist.
 
-**Acceptance criteria:**
+**Shipped scope:**
 
-- Accept a directory of ticker JSON files.
-- Emit Markdown and JSON summary tables sorted by score and risk.
-- Keep per-ticker note generation available.
-- Add tests for partial failures so one bad ticker does not hide the full batch result.
+- Added `--batch-dir` to accept a directory of local ticker JSON files.
+- Added Markdown and JSON watchlist summaries sorted by score and risk.
+- Added `--notes-dir` so batch runs can still write one Markdown due-diligence note per valid ticker.
+- Preserved partial-failure reporting so malformed or incomplete files appear in `failures` without hiding valid ticker results.
+- Covered batch ranking, Markdown summary output, JSON CLI output, per-ticker note writing, and partial failures with tests.

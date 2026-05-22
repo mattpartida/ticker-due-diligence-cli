@@ -10,6 +10,8 @@ from pathlib import Path
 from ticker_due_diligence.engine import (
     DiligenceInput,
     build_note,
+    build_watchlist,
+    build_watchlist_markdown,
     load_inputs,
     parse_financials_csv,
     parse_peers_csv,
@@ -571,6 +573,110 @@ class TickerDueDiligenceTests(unittest.TestCase):
             self.assertEqual(payload["source_coverage"]["missing_paths"], [])
             self.assertTrue(output_path.exists())
             self.assertIn("# CLI Due Diligence Note", output_path.read_text())
+
+    def test_build_watchlist_ranks_valid_tickers_and_preserves_partial_failures(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "top.json").write_text(
+                json.dumps(
+                    {
+                        "ticker": "TOP",
+                        "thesis": "Strong growth with improving cash generation.",
+                        "risk": "low",
+                        "financials": [
+                            {"period": "2023", "revenue": 100, "gross_margin": 0.30, "fcf": 1},
+                            {"period": "2024", "revenue": 140, "gross_margin": 0.38, "fcf": 5},
+                        ],
+                        "kpis": {"book_to_bill": "1.3x"},
+                        "catalysts": ["earnings"],
+                        "risks": ["execution"],
+                    }
+                )
+            )
+            (root / "watch.json").write_text(
+                json.dumps(
+                    {
+                        "ticker": "WATCH",
+                        "thesis": "Growth is slower and risk is higher.",
+                        "risk": "high",
+                        "financials": [
+                            {"period": "2023", "revenue": 100, "gross_margin": 0.40, "fcf": 2},
+                            {"period": "2024", "revenue": 103, "gross_margin": 0.36, "fcf": -1},
+                        ],
+                        "kpis": {"net_debt_to_ebitda": "4.0"},
+                        "catalysts": ["refi update"],
+                        "risks": ["leverage"],
+                    }
+                )
+            )
+            (root / "bad.json").write_text('{"thesis": "missing ticker"}')
+
+            batch = build_watchlist(root)
+            markdown = build_watchlist_markdown(batch)
+
+        self.assertEqual([row["ticker"] for row in batch["watchlist"]], ["TOP", "WATCH"])
+        self.assertEqual(batch["summary"]["total_files"], 3)
+        self.assertEqual(batch["summary"]["valid_tickers"], 2)
+        self.assertEqual(batch["summary"]["failed_files"], 1)
+        self.assertEqual(batch["failures"][0]["file"], "bad.json")
+        self.assertIn("ticker is required", batch["failures"][0]["error"])
+        self.assertIn("| Rank | Ticker | Score | Risk | Horizon | Issues |", markdown)
+        self.assertLess(markdown.index("| 1 | TOP |"), markdown.index("| 2 | WATCH |"))
+        self.assertIn("bad.json", markdown)
+
+    def test_cli_batch_dir_emits_json_summary_and_writes_per_ticker_notes(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            batch_dir = root / "batch"
+            notes_dir = root / "notes"
+            batch_dir.mkdir()
+            (batch_dir / "aaa.json").write_text(
+                json.dumps(
+                    {
+                        "ticker": "AAA",
+                        "thesis": "Batch CLI test.",
+                        "financials": [
+                            {"period": "2023", "revenue": 100, "gross_margin": 0.30, "fcf": 1},
+                            {"period": "2024", "revenue": 120, "gross_margin": 0.34, "fcf": 2},
+                        ],
+                        "kpis": {"book_to_bill": "1.2x"},
+                        "catalysts": ["earnings"],
+                        "risks": ["execution"],
+                    }
+                )
+            )
+            (batch_dir / "broken.json").write_text("not json")
+            env = os.environ.copy()
+            env["PYTHONPATH"] = str(Path(__file__).resolve().parents[1] / "src")
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "ticker_due_diligence.cli",
+                    "--batch-dir",
+                    str(batch_dir),
+                    "--notes-dir",
+                    str(notes_dir),
+                    "--format",
+                    "json",
+                ],
+                text=True,
+                capture_output=True,
+                check=True,
+                env=env,
+            )
+            payload = json.loads(result.stdout)
+            note_path = notes_dir / "AAA.md"
+            note_exists = note_path.exists()
+            note_text = note_path.read_text() if note_exists else ""
+
+        self.assertEqual(payload["summary"]["total_files"], 2)
+        self.assertEqual(payload["summary"]["valid_tickers"], 1)
+        self.assertEqual(payload["summary"]["failed_files"], 1)
+        self.assertEqual(payload["watchlist"][0]["ticker"], "AAA")
+        self.assertTrue(note_exists)
+        self.assertIn("# AAA Due Diligence Note", note_text)
 
     def test_cli_validate_only_returns_machine_readable_quality_report(self):
         with tempfile.TemporaryDirectory() as td:

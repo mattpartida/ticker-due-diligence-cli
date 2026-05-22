@@ -1,0 +1,19 @@
+{
+  "ticker": "XYZ",
+  "thesis": "Example lower-scoring watchlist entry with slower growth and higher leverage.",
+  "horizon": "1-2 quarters",
+  "risk": "medium",
+  "financials": [
+    {"period": "2023", "revenue": 100, "gross_margin": 0.45, "fcf": 3},
+    {"period": "2024", "revenue": 102, "gross_margin": 0.39, "fcf": -2}
+  ],
+  "kpis": {"net_debt_to_ebitda": "4.1"},
+  "catalysts": ["guidance update"],
+  "risks": ["execution risk"],
+  "sources": [{"id": "memo", "title": "Internal diligence memo"}],
+  "evidence": {
+    "kpis.net_debt_to_ebitda": ["memo"],
+    "catalysts[0]": ["memo"],
+    "risks[0]": ["memo"]
+  }
+}

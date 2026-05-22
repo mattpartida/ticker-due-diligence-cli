@@ -13,6 +13,7 @@ It is designed for fast first-pass stock work: capture the thesis, financial tre
 - Highlights leading indicators, strengths, concerns, watch items, catalysts, dated catalyst timelines, source coverage, and invalidation risks.
 - Writes a Markdown research note.
 - Can print a machine-readable JSON score profile.
+- Can score a directory of ticker JSON files into ranked Markdown/JSON watchlists.
 - Can validate input quality and return structured issues before note generation.
 
 ## Install locally
@@ -58,6 +59,21 @@ Add comparable-company context from a local peer table:
 ticker-dd --input examples/rdw.json --peers examples/rdw-peers.csv --format json
 ```
 
+Score a directory of ticker JSON files into a ranked watchlist:
+
+```bash
+ticker-dd --batch-dir examples/watchlist --format markdown
+```
+
+Print the same batch watchlist as JSON and keep per-ticker notes available:
+
+```bash
+ticker-dd \
+  --batch-dir examples/watchlist \
+  --notes-dir ./watchlist-notes \
+  --format json
+```
+
 Validate input quality without writing a note:
 
 ```bash
@@ -69,6 +85,8 @@ ticker-dd --input examples/rdw.json --financials examples/rdw-financials.csv --v
 JSON score profiles include `catalyst_timeline`, with dated catalyst objects sorted before undated events. Each timeline entry includes `date`, `event`, `status` (`scheduled`, `stale`, or `undated`), `source`, and `expected_signal`.
 
 JSON score profiles also include `source_coverage`, a local-only summary of how many high-impact KPI, catalyst, and risk fields have user-supplied source metadata. The CLI never fetches external sources; provide global `sources` plus per-field `evidence` references or inline catalyst `source` values.
+
+Batch watchlists use `--batch-dir` to scan `*.json` ticker inputs, continue past bad files, and emit a ranked summary sorted by highest score then lower risk. Markdown output includes a summary table plus partial-failure section; JSON output includes `summary`, `watchlist`, and `failures`. Add `--notes-dir` to write one Markdown due-diligence note per valid ticker while still producing the batch summary.
 
 See [`docs/roadmap.md`](docs/roadmap.md) for the shipped input-quality phase and planned next phases.
 
