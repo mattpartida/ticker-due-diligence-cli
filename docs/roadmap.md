@@ -45,16 +45,17 @@ This roadmap keeps the CLI focused on fast, local-first ticker diligence. Each p
 
 ## Phase 4 — Source and evidence traceability
 
-**Status:** Planned
+**Status:** Shipped
 
 **Goal:** Help users distinguish sourced observations from placeholders or unsupported assertions.
 
-**Acceptance criteria:**
+**Shipped scope:**
 
-- Accept optional `sources` and per-field evidence references.
-- Add source coverage summary to JSON and Markdown outputs.
-- Warn when high-impact risks, catalysts, or KPIs have no source.
-- Keep external fetching out of scope; source metadata remains user-supplied.
+- Accepted optional global `sources` and per-field `evidence` references while keeping source metadata user-supplied and local-only.
+- Added JSON `source_coverage` with required/sourced counts, missing evidence paths, coverage ratio, and source records.
+- Added a Markdown source coverage section listing coverage, missing evidence, and supplied source labels.
+- Added warning-level input-quality issues when KPIs, catalysts, or risks have no inline source or evidence reference.
+- Covered mixed sourced/unsourced KPI, catalyst, and risk inputs with unit tests and CLI JSON coverage checks.
 
 ## Phase 5 — Batch watchlist scoring
 

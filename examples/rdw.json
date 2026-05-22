@@ -9,8 +9,18 @@
     "book_to_bill": "1.2x"
   },
   "catalysts": [
-    "next earnings report",
-    "NASA / defense contract awards",
+    {
+      "event": "next earnings report",
+      "date": "TBD",
+      "source": "company-calendar",
+      "expected_signal": "backlog conversion and margin commentary"
+    },
+    {
+      "event": "NASA / defense contract awards",
+      "date": "TBD",
+      "source": "contract-pipeline",
+      "expected_signal": "award timing or delay"
+    },
     "updated margin guidance"
   ],
   "risks": [
@@ -18,6 +28,21 @@
     "program delays",
     "gross margin execution"
   ],
+  "sources": [
+    {"id": "company-calendar", "title": "Company investor-event calendar"},
+    {"id": "contract-pipeline", "title": "User-supplied contract pipeline notes"},
+    {"id": "10q", "title": "Latest 10-Q / quarterly filing"},
+    {"id": "memo", "title": "Internal diligence memo"}
+  ],
+  "evidence": {
+    "kpis.backlog_growth": ["10q"],
+    "kpis.net_debt_to_ebitda": ["10q"],
+    "kpis.book_to_bill": ["memo"],
+    "catalysts[2]": ["memo"],
+    "risks[0]": ["10q"],
+    "risks[1]": ["contract-pipeline"],
+    "risks[2]": ["memo"]
+  },
   "notes": [
     "Use this as a template for a first-pass ticker diligence note. Replace sample data before relying on it."
   ]

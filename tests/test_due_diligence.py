@@ -373,6 +373,106 @@ class TickerDueDiligenceTests(unittest.TestCase):
         self.assertEqual(loaded.catalysts[1]["event"], "FDA decision")
         self.assertEqual(loaded.catalysts[1]["date"], "2026-06-01")
 
+    def test_source_coverage_accepts_global_sources_and_field_evidence(self):
+        data = DiligenceInput(
+            ticker="SRC",
+            thesis="Evidence should be visible in the diligence output.",
+            financials=[
+                {"period": "2023", "revenue": 100.0, "gross_margin": 0.30, "fcf": 1.0},
+                {"period": "2024", "revenue": 120.0, "gross_margin": 0.35, "fcf": 2.0},
+            ],
+            kpis={"book_to_bill": "1.2x", "churn": "5%"},
+            catalysts=[
+                {"event": "Investor day", "date": "2026-06-01", "source": "investor-day-pr"},
+                "earnings call",
+            ],
+            risks=["customer concentration"],
+            sources=[
+                {"id": "investor-day-pr", "title": "Investor day announcement"},
+                {"id": "10q", "title": "Latest 10-Q"},
+            ],
+            evidence={
+                "kpis.book_to_bill": "10q",
+                "risks[0]": ["10q"],
+            },
+        )
+
+        profile = score_profile(data)
+        note = build_note(data)
+
+        self.assertEqual(profile.source_coverage["total_required"], 5)
+        self.assertEqual(profile.source_coverage["sourced_required"], 3)
+        self.assertEqual(profile.source_coverage["coverage_ratio"], 0.6)
+        self.assertIn("kpis.churn", profile.source_coverage["missing_paths"])
+        self.assertIn("catalysts[1]", profile.source_coverage["missing_paths"])
+        self.assertIn("sources", profile.source_coverage)
+        self.assertIn("## Source coverage", note)
+        self.assertIn("Required evidence coverage: 3/5 (60%)", note)
+        self.assertIn("Missing evidence: kpis.churn, catalysts[1]", note)
+        self.assertIn("investor-day-pr: Investor day announcement", note)
+
+    def test_validate_input_warns_when_high_impact_items_lack_sources(self):
+        data = DiligenceInput(
+            ticker="NOSRC",
+            thesis="Unsupported high-impact claims should be flagged.",
+            financials=[
+                {"period": "2023", "revenue": 100.0, "gross_margin": 0.30, "fcf": 1.0},
+                {"period": "2024", "revenue": 120.0, "gross_margin": 0.35, "fcf": 2.0},
+            ],
+            kpis={"book_to_bill": "1.2x"},
+            catalysts=[{"event": "Investor day", "date": "2026-06-01"}],
+            risks=["customer concentration"],
+            sources=[{"id": "10q", "title": "Latest 10-Q"}],
+            evidence={},
+        )
+
+        issue_dicts = [issue.to_dict() for issue in validate_input(data)]
+
+        self.assertIn(
+            {
+                "severity": "warning",
+                "path": "kpis.book_to_bill",
+                "message": "Add a source or evidence reference for this high-impact KPI.",
+            },
+            issue_dicts,
+        )
+        self.assertIn(
+            {
+                "severity": "warning",
+                "path": "catalysts[0]",
+                "message": "Add a source or evidence reference for this catalyst.",
+            },
+            issue_dicts,
+        )
+        self.assertIn(
+            {
+                "severity": "warning",
+                "path": "risks[0]",
+                "message": "Add a source or evidence reference for this risk.",
+            },
+            issue_dicts,
+        )
+
+    def test_load_inputs_accepts_sources_and_field_evidence(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            json_path = root / "input.json"
+            json_path.write_text(
+                json.dumps(
+                    {
+                        "ticker": "SRC",
+                        "thesis": "Evidence metadata should load from JSON.",
+                        "sources": [{"id": "10q", "title": "Latest 10-Q"}],
+                        "evidence": {"kpis.book_to_bill": ["10q"]},
+                    }
+                )
+            )
+
+            loaded = load_inputs(json_path=json_path)
+
+        self.assertEqual(loaded.sources[0]["id"], "10q")
+        self.assertEqual(loaded.evidence["kpis.book_to_bill"], ["10q"])
+
     def test_validate_input_reports_blocking_and_warning_issues(self):
         data = DiligenceInput(
             ticker="MISS",
@@ -434,6 +534,12 @@ class TickerDueDiligenceTests(unittest.TestCase):
                         "kpis": {"book_to_bill": "1.2x"},
                         "catalysts": ["product launch"],
                         "risks": ["launch slips"],
+                        "sources": [{"id": "memo", "title": "Internal diligence memo"}],
+                        "evidence": {
+                            "kpis.book_to_bill": ["memo"],
+                            "catalysts[0]": ["memo"],
+                            "risks[0]": ["memo"],
+                        },
                     }
                 )
             )
@@ -461,6 +567,8 @@ class TickerDueDiligenceTests(unittest.TestCase):
 
             self.assertEqual(payload["ticker"], "CLI")
             self.assertEqual(payload["input_quality_issues"], [])
+            self.assertEqual(payload["source_coverage"]["sourced_required"], 3)
+            self.assertEqual(payload["source_coverage"]["missing_paths"], [])
             self.assertTrue(output_path.exists())
             self.assertIn("# CLI Due Diligence Note", output_path.read_text())
 

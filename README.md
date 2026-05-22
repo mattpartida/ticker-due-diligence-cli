@@ -10,7 +10,7 @@ It is designed for fast first-pass stock work: capture the thesis, financial tre
 - Optionally merges a CSV financial history file.
 - Optionally merges a local peer-comparison CSV or inline JSON peer list.
 - Scores the setup from 0-100 using simple transparent heuristics.
-- Highlights leading indicators, strengths, concerns, watch items, catalysts, dated catalyst timelines, and invalidation risks.
+- Highlights leading indicators, strengths, concerns, watch items, catalysts, dated catalyst timelines, source coverage, and invalidation risks.
 - Writes a Markdown research note.
 - Can print a machine-readable JSON score profile.
 - Can validate input quality and return structured issues before note generation.
@@ -68,6 +68,8 @@ ticker-dd --input examples/rdw.json --financials examples/rdw-financials.csv --v
 
 JSON score profiles include `catalyst_timeline`, with dated catalyst objects sorted before undated events. Each timeline entry includes `date`, `event`, `status` (`scheduled`, `stale`, or `undated`), `source`, and `expected_signal`.
 
+JSON score profiles also include `source_coverage`, a local-only summary of how many high-impact KPI, catalyst, and risk fields have user-supplied source metadata. The CLI never fetches external sources; provide global `sources` plus per-field `evidence` references or inline catalyst `source` values.
+
 See [`docs/roadmap.md`](docs/roadmap.md) for the shipped input-quality phase and planned next phases.
 
 ## JSON input shape
@@ -91,13 +93,25 @@ See [`docs/roadmap.md`](docs/roadmap.md) for the shipped input-quality phase and
       "expected_signal": "award timing or delay"
     }
   ],
-  "risks": ["dilution risk"]
+  "risks": ["dilution risk"],
+  "sources": [
+    {"id": "10q", "title": "Latest 10-Q"},
+    {"id": "pr", "title": "Company press release"}
+  ],
+  "evidence": {
+    "kpis.backlog_growth": ["10q"],
+    "kpis.net_debt_to_ebitda": ["10q"],
+    "catalysts[0]": ["pr"],
+    "risks[0]": ["10q"]
+  }
 }
 ```
 
 You can include `financials` inline in JSON or provide `--financials` as CSV.
 
 Catalysts may remain simple strings for backwards compatibility or use objects with optional `date`, `source`, and `expected_signal` fields. Dates should use `YYYY-MM-DD`; missing/TBD dates are shown as `undated`, and past dates are shown as `stale` in the Markdown forcing-event table and JSON timeline.
+
+Source traceability is user-supplied and local-only. Add `sources` as a list of source records with stable `id` values, then map high-impact fields to those IDs through `evidence` paths such as `kpis.backlog_growth`, `catalysts[0]`, and `risks[0]`. Catalyst objects can also carry an inline `source`. Missing evidence for KPIs, catalysts, and risks appears as warning-level input-quality issues and in the Markdown/JSON source coverage summary.
 
 ## Financials CSV shape
 

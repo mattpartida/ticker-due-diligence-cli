@@ -21,6 +21,8 @@ class DiligenceInput:
     risks: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
     peers: list[dict[str, Any]] = field(default_factory=list)
+    sources: list[dict[str, Any]] = field(default_factory=list)
+    evidence: dict[str, list[str]] = field(default_factory=dict)
 
 
 @dataclass
@@ -47,6 +49,7 @@ class DiligenceProfile:
     input_quality_issues: list[dict[str, str]] = field(default_factory=list)
     peer_context: list[str] = field(default_factory=list)
     catalyst_timeline: list[dict[str, str]] = field(default_factory=list)
+    source_coverage: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -116,6 +119,34 @@ def _normalize_peers(peers: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return [_normalize_peer(peer) for peer in peers]
 
 
+def _normalize_sources(sources: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    normalized_sources: list[dict[str, Any]] = []
+    for index, source in enumerate(sources):
+        source_id = str(source.get("id") or source.get("source") or f"source-{index + 1}").strip()
+        if not source_id:
+            source_id = f"source-{index + 1}"
+        normalized = {str(key).strip(): value for key, value in source.items() if key is not None}
+        normalized["id"] = source_id
+        normalized_sources.append(normalized)
+    return normalized_sources
+
+
+def _normalize_evidence(evidence: dict[str, Any]) -> dict[str, list[str]]:
+    normalized: dict[str, list[str]] = {}
+    for path, refs in evidence.items():
+        evidence_path = str(path).strip()
+        if not evidence_path:
+            continue
+        if isinstance(refs, list):
+            normalized_refs = [str(ref).strip() for ref in refs if str(ref).strip()]
+        elif refs in (None, ""):
+            normalized_refs = []
+        else:
+            normalized_refs = [str(refs).strip()]
+        normalized[evidence_path] = normalized_refs
+    return normalized
+
+
 def load_inputs(
     *,
     json_path: str | Path | None = None,
@@ -145,7 +176,53 @@ def load_inputs(
         risks=[str(item) for item in payload.get("risks") or []],
         notes=[str(item) for item in payload.get("notes") or []],
         peers=_normalize_peers(list(payload.get("peers") or [])),
+        sources=_normalize_sources(list(payload.get("sources") or [])),
+        evidence=_normalize_evidence(dict(payload.get("evidence") or {})),
     )
+
+
+def _evidence_refs(data: DiligenceInput, path: str) -> list[str]:
+    refs = data.evidence.get(path, [])
+    if isinstance(refs, list):
+        return [str(ref).strip() for ref in refs if str(ref).strip()]
+    if refs in (None, ""):
+        return []
+    return [str(refs).strip()]
+
+
+def _inline_source_refs(item: Any) -> list[str]:
+    if not isinstance(item, dict):
+        return []
+    source = item.get("source") or item.get("source_id") or item.get("evidence")
+    if isinstance(source, list):
+        return [str(ref).strip() for ref in source if str(ref).strip()]
+    if source in (None, ""):
+        return []
+    return [str(source).strip()]
+
+
+def _has_source(data: DiligenceInput, path: str, item: Any | None = None) -> bool:
+    return bool(_evidence_refs(data, path) or _inline_source_refs(item))
+
+
+def build_source_coverage(data: DiligenceInput) -> dict[str, Any]:
+    required_paths: list[tuple[str, Any | None]] = []
+    required_paths.extend((f"kpis.{key}", None) for key in data.kpis)
+    required_paths.extend(
+        (f"catalysts[{index}]", catalyst) for index, catalyst in enumerate(data.catalysts)
+    )
+    required_paths.extend((f"risks[{index}]", None) for index, _risk in enumerate(data.risks))
+    missing_paths = [path for path, item in required_paths if not _has_source(data, path, item)]
+    total_required = len(required_paths)
+    sourced_required = total_required - len(missing_paths)
+    coverage_ratio = round(sourced_required / total_required, 2) if total_required else 1.0
+    return {
+        "total_required": total_required,
+        "sourced_required": sourced_required,
+        "coverage_ratio": coverage_ratio,
+        "missing_paths": missing_paths,
+        "sources": data.sources,
+    }
 
 
 def validate_input(data: DiligenceInput) -> list[InputQualityIssue]:
@@ -187,6 +264,16 @@ def validate_input(data: DiligenceInput) -> list[InputQualityIssue]:
                 ),
             )
         )
+    for key in data.kpis:
+        path = f"kpis.{key}"
+        if not _has_source(data, path):
+            issues.append(
+                InputQualityIssue(
+                    severity="warning",
+                    path=path,
+                    message="Add a source or evidence reference for this high-impact KPI.",
+                )
+            )
     if not data.catalysts:
         issues.append(
             InputQualityIssue(
@@ -196,6 +283,15 @@ def validate_input(data: DiligenceInput) -> list[InputQualityIssue]:
             )
         )
     for index, catalyst in enumerate(data.catalysts):
+        catalyst_path = f"catalysts[{index}]"
+        if not _has_source(data, catalyst_path, catalyst):
+            issues.append(
+                InputQualityIssue(
+                    severity="warning",
+                    path=catalyst_path,
+                    message="Add a source or evidence reference for this catalyst.",
+                )
+            )
         if isinstance(catalyst, dict) and not str(catalyst.get("date", "")).strip():
             issues.append(
                 InputQualityIssue(
@@ -214,6 +310,16 @@ def validate_input(data: DiligenceInput) -> list[InputQualityIssue]:
                 message="Add thesis invalidation risks before relying on the note.",
             )
         )
+    for index, _risk in enumerate(data.risks):
+        path = f"risks[{index}]"
+        if not _has_source(data, path):
+            issues.append(
+                InputQualityIssue(
+                    severity="warning",
+                    path=path,
+                    message="Add a source or evidence reference for this risk.",
+                )
+            )
     for index, peer in enumerate(data.peers):
         if peer.get("ticker") in (None, ""):
             issues.append(
@@ -479,6 +585,7 @@ def score_profile(data: DiligenceInput) -> DiligenceProfile:
     quality_issues = [issue.to_dict() for issue in validate_input(data)]
     peer_context = build_peer_context(data, revenue_growth, new_margin)
     catalyst_timeline = build_catalyst_timeline(data.catalysts)
+    source_coverage = build_source_coverage(data)
     bounded = max(0, min(100, round(score)))
     return DiligenceProfile(
         ticker=data.ticker.upper(),
@@ -493,6 +600,7 @@ def score_profile(data: DiligenceInput) -> DiligenceProfile:
         input_quality_issues=quality_issues,
         peer_context=peer_context,
         catalyst_timeline=catalyst_timeline,
+        source_coverage=source_coverage,
     )
 
 
@@ -535,6 +643,31 @@ def _catalyst_table(timeline: list[dict[str, str]]) -> str:
     return "\n".join(rows)
 
 
+def _source_coverage_bullets(source_coverage: dict[str, Any]) -> list[str]:
+    total = int(source_coverage.get("total_required", 0))
+    sourced = int(source_coverage.get("sourced_required", 0))
+    ratio = float(source_coverage.get("coverage_ratio", 1.0))
+    missing_paths = [str(path) for path in source_coverage.get("missing_paths", [])]
+    bullets = [f"Required evidence coverage: {sourced}/{total} ({ratio:.0%})"]
+    if missing_paths:
+        bullets.append("Missing evidence: " + ", ".join(missing_paths))
+    else:
+        bullets.append("No missing high-impact evidence references")
+    sources = source_coverage.get("sources", [])
+    if sources:
+        source_labels = []
+        for source in sources:
+            source_id = str(source.get("id", "source")).strip()
+            title = str(
+                source.get("title") or source.get("name") or source.get("url") or "untitled"
+            ).strip()
+            source_labels.append(f"{source_id}: {title}")
+        bullets.append("Sources: " + "; ".join(source_labels))
+    else:
+        bullets.append("Sources: none supplied")
+    return bullets
+
+
 def build_note(data: DiligenceInput) -> str:
     profile = score_profile(data)
     catalyst_names = [_catalyst_name(catalyst) for catalyst in data.catalysts] or [
@@ -556,6 +689,9 @@ def build_note(data: DiligenceInput) -> str:
         "",
         "## Input quality",
         _bullet(_quality_bullets(profile.input_quality_issues)),
+        "",
+        "## Source coverage",
+        _bullet(_source_coverage_bullets(profile.source_coverage)),
         "",
         "### Strengths",
         _bullet(profile.strengths),
