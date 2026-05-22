@@ -285,6 +285,94 @@ class TickerDueDiligenceTests(unittest.TestCase):
         self.assertTrue(payload["peer_context"])
         self.assertTrue(any("peer median" in item for item in payload["peer_context"]))
 
+    def test_catalyst_timeline_sorts_dated_events_and_preserves_string_shape(self):
+        data = DiligenceInput(
+            ticker="CAT",
+            thesis="Catalyst timing should drive the diligence plan.",
+            financials=[
+                {"period": "2023", "revenue": 100.0, "gross_margin": 0.30, "fcf": 1.0},
+                {"period": "2024", "revenue": 120.0, "gross_margin": 0.35, "fcf": 2.0},
+            ],
+            kpis={"book_to_bill": "1.2x"},
+            catalysts=[
+                {
+                    "event": "FDA decision",
+                    "date": "2026-06-01",
+                    "source": "company PR",
+                    "expected_signal": "approval or delay",
+                },
+                "earnings call",
+                {"name": "Investor day", "date": "2026-03-15"},
+            ],
+            risks=["execution"],
+        )
+
+        profile = score_profile(data)
+        note = build_note(data)
+
+        self.assertEqual(
+            [item["event"] for item in profile.catalyst_timeline],
+            ["Investor day", "FDA decision", "earnings call"],
+        )
+        self.assertEqual(profile.catalyst_timeline[0]["status"], "stale")
+        self.assertEqual(profile.catalyst_timeline[1]["status"], "scheduled")
+        self.assertEqual(profile.catalyst_timeline[2]["status"], "undated")
+        self.assertEqual(profile.catalyst_timeline[1]["source"], "company PR")
+        self.assertEqual(profile.catalyst_timeline[1]["expected_signal"], "approval or delay")
+        self.assertIn("## Catalyst timeline", note)
+        self.assertIn("| Date | Event | Status | Source | Expected signal |", note)
+        self.assertIn("| 2026-03-15 | Investor day | stale | — | — |", note)
+        self.assertIn("| TBD | earnings call | undated | — | — |", note)
+
+    def test_validate_input_flags_undated_catalyst_objects(self):
+        data = DiligenceInput(
+            ticker="CAT",
+            thesis="Catalyst timing should drive the diligence plan.",
+            financials=[
+                {"period": "2023", "revenue": 100.0, "gross_margin": 0.30, "fcf": 1.0},
+                {"period": "2024", "revenue": 120.0, "gross_margin": 0.35, "fcf": 2.0},
+            ],
+            kpis={"book_to_bill": "1.2x"},
+            catalysts=[{"event": "Investor day"}],
+            risks=["execution"],
+        )
+
+        issue_dicts = [issue.to_dict() for issue in validate_input(data)]
+
+        self.assertIn(
+            {
+                "severity": "warning",
+                "path": "catalysts[0].date",
+                "message": (
+                    "Add a catalyst date or mark the event as TBD so stale events are obvious."
+                ),
+            },
+            issue_dicts,
+        )
+
+    def test_load_inputs_accepts_mixed_catalyst_objects(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            json_path = root / "input.json"
+            json_path.write_text(
+                json.dumps(
+                    {
+                        "ticker": "CAT",
+                        "thesis": "Catalyst timing should drive the diligence plan.",
+                        "catalysts": [
+                            "earnings call",
+                            {"event": "FDA decision", "date": "2026-06-01"},
+                        ],
+                    }
+                )
+            )
+
+            loaded = load_inputs(json_path=json_path)
+
+        self.assertEqual(loaded.catalysts[0], "earnings call")
+        self.assertEqual(loaded.catalysts[1]["event"], "FDA decision")
+        self.assertEqual(loaded.catalysts[1]["date"], "2026-06-01")
+
     def test_validate_input_reports_blocking_and_warning_issues(self):
         data = DiligenceInput(
             ticker="MISS",

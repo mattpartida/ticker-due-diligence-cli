@@ -32,16 +32,16 @@ This roadmap keeps the CLI focused on fast, local-first ticker diligence. Each p
 
 ## Phase 3 — Catalyst calendar and forcing-event tracking
 
-**Status:** Planned
+**Status:** Shipped
 
 **Goal:** Turn catalysts into dated forcing events with watch windows and stale-event warnings.
 
-**Acceptance criteria:**
+**Shipped scope:**
 
-- Accept catalyst objects with optional `date`, `source`, and `expected_signal` fields while preserving the current string-list shape.
-- Sort dated catalysts and flag events that are stale or undated.
-- Add a Markdown forcing-event table and JSON catalyst timeline.
-- Add tests for mixed dated and undated catalysts.
+- Accepted catalyst objects with optional `date`, `source`, and `expected_signal` fields while preserving the current string-list shape.
+- Added sorted JSON `catalyst_timeline` entries with `scheduled`, `stale`, and `undated` status labels.
+- Added a Markdown catalyst timeline / forcing-event table with source and expected-signal columns.
+- Added validation warnings for undated catalyst objects and tests for mixed dated and undated catalysts.
 
 ## Phase 4 — Source and evidence traceability
 

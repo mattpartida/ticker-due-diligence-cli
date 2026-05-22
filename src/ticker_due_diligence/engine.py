@@ -4,6 +4,7 @@ import csv
 import json
 import re
 from dataclasses import asdict, dataclass, field
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -16,7 +17,7 @@ class DiligenceInput:
     risk: str = "unspecified"
     financials: list[dict[str, Any]] = field(default_factory=list)
     kpis: dict[str, Any] = field(default_factory=dict)
-    catalysts: list[str] = field(default_factory=list)
+    catalysts: list[str | dict[str, Any]] = field(default_factory=list)
     risks: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
     peers: list[dict[str, Any]] = field(default_factory=list)
@@ -45,6 +46,7 @@ class DiligenceProfile:
     questions: list[str]
     input_quality_issues: list[dict[str, str]] = field(default_factory=list)
     peer_context: list[str] = field(default_factory=list)
+    catalyst_timeline: list[dict[str, str]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -139,7 +141,7 @@ def load_inputs(
         risk=str(payload.get("risk", "unspecified")),
         financials=list(payload.get("financials") or []),
         kpis=dict(payload.get("kpis") or {}),
-        catalysts=[str(item) for item in payload.get("catalysts") or []],
+        catalysts=list(payload.get("catalysts") or []),
         risks=[str(item) for item in payload.get("risks") or []],
         notes=[str(item) for item in payload.get("notes") or []],
         peers=_normalize_peers(list(payload.get("peers") or [])),
@@ -193,6 +195,17 @@ def validate_input(data: DiligenceInput) -> list[InputQualityIssue]:
                 message="Add at least one catalyst or forcing event to watch.",
             )
         )
+    for index, catalyst in enumerate(data.catalysts):
+        if isinstance(catalyst, dict) and not str(catalyst.get("date", "")).strip():
+            issues.append(
+                InputQualityIssue(
+                    severity="warning",
+                    path=f"catalysts[{index}].date",
+                    message=(
+                        "Add a catalyst date or mark the event as TBD so stale events are obvious."
+                    ),
+                )
+            )
     if not data.risks:
         issues.append(
             InputQualityIssue(
@@ -328,6 +341,59 @@ def _extract_number(value: Any) -> float | None:
     return number
 
 
+def _catalyst_name(catalyst: str | dict[str, Any]) -> str:
+    if isinstance(catalyst, dict):
+        return str(
+            catalyst.get("event")
+            or catalyst.get("name")
+            or catalyst.get("title")
+            or "Unnamed catalyst"
+        ).strip()
+    return str(catalyst).strip()
+
+
+def _parse_iso_date(value: Any) -> date | None:
+    text = str(value or "").strip()
+    if not text or text.upper() in {"TBD", "N/A", "NA"}:
+        return None
+    try:
+        return date.fromisoformat(text)
+    except ValueError:
+        return None
+
+
+def build_catalyst_timeline(catalysts: list[str | dict[str, Any]]) -> list[dict[str, str]]:
+    today = date.today()
+    timeline: list[dict[str, str]] = []
+    for catalyst in catalysts:
+        catalyst_date = catalyst.get("date") if isinstance(catalyst, dict) else ""
+        parsed_date = _parse_iso_date(catalyst_date)
+        status = "scheduled" if parsed_date else "undated"
+        if parsed_date and parsed_date < today:
+            status = "stale"
+        timeline.append(
+            {
+                "date": parsed_date.isoformat() if parsed_date else "TBD",
+                "event": _catalyst_name(catalyst),
+                "status": status,
+                "source": str(catalyst.get("source", "")).strip()
+                if isinstance(catalyst, dict)
+                else "",
+                "expected_signal": str(catalyst.get("expected_signal", "")).strip()
+                if isinstance(catalyst, dict)
+                else "",
+            }
+        )
+    return sorted(
+        timeline,
+        key=lambda item: (
+            item["date"] == "TBD",
+            item["date"] if item["date"] != "TBD" else "9999-12-31",
+            item["event"].lower(),
+        ),
+    )
+
+
 def score_profile(data: DiligenceInput) -> DiligenceProfile:
     score = 50
     strengths: list[str] = []
@@ -412,6 +478,7 @@ def score_profile(data: DiligenceInput) -> DiligenceProfile:
     ]
     quality_issues = [issue.to_dict() for issue in validate_input(data)]
     peer_context = build_peer_context(data, revenue_growth, new_margin)
+    catalyst_timeline = build_catalyst_timeline(data.catalysts)
     bounded = max(0, min(100, round(score)))
     return DiligenceProfile(
         ticker=data.ticker.upper(),
@@ -425,6 +492,7 @@ def score_profile(data: DiligenceInput) -> DiligenceProfile:
         questions=questions,
         input_quality_issues=quality_issues,
         peer_context=peer_context,
+        catalyst_timeline=catalyst_timeline,
     )
 
 
@@ -438,9 +506,40 @@ def _quality_bullets(issues: list[dict[str, str]]) -> list[str]:
     return [f"[{issue['severity']}] {issue['path']}: {issue['message']}" for issue in issues]
 
 
+def _markdown_cell(value: str) -> str:
+    text = value.strip() or "—"
+    return text.replace("|", "\\|")
+
+
+def _catalyst_table(timeline: list[dict[str, str]]) -> str:
+    if not timeline:
+        return "No catalyst supplied"
+    rows = [
+        "| Date | Event | Status | Source | Expected signal |",
+        "| --- | --- | --- | --- | --- |",
+    ]
+    for item in timeline:
+        rows.append(
+            "| "
+            + " | ".join(
+                [
+                    _markdown_cell(item["date"]),
+                    _markdown_cell(item["event"]),
+                    _markdown_cell(item["status"]),
+                    _markdown_cell(item.get("source", "")),
+                    _markdown_cell(item.get("expected_signal", "")),
+                ]
+            )
+            + " |"
+        )
+    return "\n".join(rows)
+
+
 def build_note(data: DiligenceInput) -> str:
     profile = score_profile(data)
-    catalysts = data.catalysts or ["No catalyst supplied"]
+    catalyst_names = [_catalyst_name(catalyst) for catalyst in data.catalysts] or [
+        "No catalyst supplied"
+    ]
     risks = data.risks or ["No invalidation risk supplied"]
     notes = data.notes or []
     parts = [
@@ -471,7 +570,10 @@ def build_note(data: DiligenceInput) -> str:
         _bullet(profile.peer_context),
         "",
         "## Catalysts",
-        _bullet(catalysts),
+        _bullet(catalyst_names),
+        "",
+        "## Catalyst timeline",
+        _catalyst_table(profile.catalyst_timeline),
         "",
         "## Risks / invalidation",
         _bullet(risks),

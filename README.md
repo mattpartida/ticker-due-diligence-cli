@@ -10,7 +10,7 @@ It is designed for fast first-pass stock work: capture the thesis, financial tre
 - Optionally merges a CSV financial history file.
 - Optionally merges a local peer-comparison CSV or inline JSON peer list.
 - Scores the setup from 0-100 using simple transparent heuristics.
-- Highlights leading indicators, strengths, concerns, watch items, catalysts, and invalidation risks.
+- Highlights leading indicators, strengths, concerns, watch items, catalysts, dated catalyst timelines, and invalidation risks.
 - Writes a Markdown research note.
 - Can print a machine-readable JSON score profile.
 - Can validate input quality and return structured issues before note generation.
@@ -66,6 +66,8 @@ ticker-dd --input examples/rdw.json --financials examples/rdw-financials.csv --v
 
 `--validate-only` prints JSON with `ticker`, `has_errors`, and structured `issues` entries containing `severity`, `path`, and `message`. Blocking errors return exit code `1`; warning-only reports return `0`.
 
+JSON score profiles include `catalyst_timeline`, with dated catalyst objects sorted before undated events. Each timeline entry includes `date`, `event`, `status` (`scheduled`, `stale`, or `undated`), `source`, and `expected_signal`.
+
 See [`docs/roadmap.md`](docs/roadmap.md) for the shipped input-quality phase and planned next phases.
 
 ## JSON input shape
@@ -80,12 +82,22 @@ See [`docs/roadmap.md`](docs/roadmap.md) for the shipped input-quality phase and
     "backlog_growth": "28%",
     "net_debt_to_ebitda": "1.8"
   },
-  "catalysts": ["earnings", "NASA award"],
+  "catalysts": [
+    "earnings",
+    {
+      "event": "NASA award decision",
+      "date": "2026-06-01",
+      "source": "company backlog commentary",
+      "expected_signal": "award timing or delay"
+    }
+  ],
   "risks": ["dilution risk"]
 }
 ```
 
 You can include `financials` inline in JSON or provide `--financials` as CSV.
+
+Catalysts may remain simple strings for backwards compatibility or use objects with optional `date`, `source`, and `expected_signal` fields. Dates should use `YYYY-MM-DD`; missing/TBD dates are shown as `undated`, and past dates are shown as `stale` in the Markdown forcing-event table and JSON timeline.
 
 ## Financials CSV shape
 
