@@ -10,7 +10,7 @@ It is designed for fast first-pass stock work: capture the thesis, financial tre
 - Optionally merges a CSV financial history file.
 - Optionally merges a local peer-comparison CSV or inline JSON peer list.
 - Scores the setup from 0-100 using simple transparent heuristics.
-- Highlights leading indicators, strengths, concerns, watch items, catalysts, dated catalyst timelines, source coverage, and invalidation risks.
+- Highlights leading indicators, strengths, concerns, watch items, catalysts, dated catalyst timelines, scenario analysis, source coverage, and invalidation risks.
 - Writes a Markdown research note.
 - Can print a machine-readable JSON score profile.
 - Can score a directory of ticker JSON files into ranked Markdown/JSON watchlists.
@@ -86,6 +86,8 @@ JSON score profiles include `catalyst_timeline`, with dated catalyst objects sor
 
 JSON score profiles also include `source_coverage`, a local-only summary of how many high-impact KPI, catalyst, and risk fields have user-supplied source metadata. The CLI never fetches external sources; provide global `sources` plus per-field `evidence` references or inline catalyst `source` values.
 
+JSON score profiles also include `scenario_analysis` when local scenario cases are supplied. Each scenario can include `case`, `probability`, `return`, optional `score_delta`, and optional `thesis`; the CLI reports weighted expected return, weighted score delta, probability total, and normalized cases in JSON and Markdown.
+
 Batch watchlists use `--batch-dir` to scan `*.json` ticker inputs, continue past bad files, and emit a ranked summary sorted by highest score then lower risk. Markdown output includes a summary table plus partial-failure section; JSON output includes `summary`, `watchlist`, and `failures`. Add `--notes-dir` to write one Markdown due-diligence note per valid ticker while still producing the batch summary.
 
 See [`docs/roadmap.md`](docs/roadmap.md) for the shipped input-quality phase and planned next phases.
@@ -121,7 +123,12 @@ See [`docs/roadmap.md`](docs/roadmap.md) for the shipped input-quality phase and
     "kpis.net_debt_to_ebitda": ["10q"],
     "catalysts[0]": ["pr"],
     "risks[0]": ["10q"]
-  }
+  },
+  "scenarios": [
+    {"case": "bear", "probability": "25%", "return": "-40%", "score_delta": -12},
+    {"case": "base", "probability": "50%", "return": "20%", "score_delta": 5},
+    {"case": "bull", "probability": "25%", "return": "80%", "score_delta": 12}
+  ]
 }
 ```
 
@@ -130,6 +137,8 @@ You can include `financials` inline in JSON or provide `--financials` as CSV.
 Catalysts may remain simple strings for backwards compatibility or use objects with optional `date`, `source`, and `expected_signal` fields. Dates should use `YYYY-MM-DD`; missing/TBD dates are shown as `undated`, and past dates are shown as `stale` in the Markdown forcing-event table and JSON timeline.
 
 Source traceability is user-supplied and local-only. Add `sources` as a list of source records with stable `id` values, then map high-impact fields to those IDs through `evidence` paths such as `kpis.backlog_growth`, `catalysts[0]`, and `risks[0]`. Catalyst objects can also carry an inline `source`. Missing evidence for KPIs, catalysts, and risks appears as warning-level input-quality issues and in the Markdown/JSON source coverage summary.
+
+Scenarios are local, user-supplied cases for framing upside/downside and score sensitivity. Add `scenarios` with `case`, `probability`, and `return` values; optional `score_delta` adjusts the heuristic score by the probability-weighted delta. Probabilities should sum to 100%, otherwise validation emits a warning while still producing the weighted analysis.
 
 ## Financials CSV shape
 

@@ -23,6 +23,7 @@ class DiligenceInput:
     peers: list[dict[str, Any]] = field(default_factory=list)
     sources: list[dict[str, Any]] = field(default_factory=list)
     evidence: dict[str, list[str]] = field(default_factory=dict)
+    scenarios: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
@@ -50,6 +51,7 @@ class DiligenceProfile:
     peer_context: list[str] = field(default_factory=list)
     catalyst_timeline: list[dict[str, str]] = field(default_factory=list)
     source_coverage: dict[str, Any] = field(default_factory=dict)
+    scenario_analysis: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -147,6 +149,26 @@ def _normalize_evidence(evidence: dict[str, Any]) -> dict[str, list[str]]:
     return normalized
 
 
+def _normalize_scenarios(scenarios: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    normalized: list[dict[str, Any]] = []
+    for index, scenario in enumerate(scenarios):
+        row = {str(key).strip(): value for key, value in scenario.items() if key is not None}
+        case = str(row.get("case") or row.get("name") or f"case-{index + 1}").strip()
+        if not case:
+            case = f"case-{index + 1}"
+        row["case"] = case.lower()
+        if "probability" in row:
+            row["probability"] = _as_number(row["probability"])
+        if "return" in row:
+            row["return"] = _as_number(row["return"])
+        if "expected_return" in row and "return" not in row:
+            row["return"] = _as_number(row["expected_return"])
+        if "score_delta" in row:
+            row["score_delta"] = _as_number(row["score_delta"])
+        normalized.append(row)
+    return normalized
+
+
 def load_inputs(
     *,
     json_path: str | Path | None = None,
@@ -178,6 +200,7 @@ def load_inputs(
         peers=_normalize_peers(list(payload.get("peers") or [])),
         sources=_normalize_sources(list(payload.get("sources") or [])),
         evidence=_normalize_evidence(dict(payload.get("evidence") or {})),
+        scenarios=_normalize_scenarios(list(payload.get("scenarios") or [])),
     )
 
 
@@ -222,6 +245,54 @@ def build_source_coverage(data: DiligenceInput) -> dict[str, Any]:
         "coverage_ratio": coverage_ratio,
         "missing_paths": missing_paths,
         "sources": data.sources,
+    }
+
+
+def _scenario_probability_total(scenarios: list[dict[str, Any]]) -> float:
+    return sum(
+        float(scenario["probability"])
+        for scenario in scenarios
+        if isinstance(scenario.get("probability"), (int, float))
+    )
+
+
+def build_scenario_analysis(scenarios: list[dict[str, Any]]) -> dict[str, Any]:
+    scenarios = _normalize_scenarios(scenarios)
+    if not scenarios:
+        return {
+            "probability_total": 0.0,
+            "weighted_return": None,
+            "weighted_score_delta": 0.0,
+            "cases": [],
+        }
+    probability_total = round(_scenario_probability_total(scenarios), 4)
+    cases: list[dict[str, Any]] = []
+    weighted_return = 0.0
+    weighted_score_delta = 0.0
+    has_return = False
+    for scenario in scenarios:
+        probability = scenario.get("probability")
+        expected_return = scenario.get("return")
+        score_delta = scenario.get("score_delta")
+        case = {
+            "case": str(scenario.get("case", "case")),
+            "probability": probability if isinstance(probability, (int, float)) else None,
+            "return": expected_return if isinstance(expected_return, (int, float)) else None,
+            "score_delta": score_delta if isinstance(score_delta, (int, float)) else 0.0,
+            "thesis": str(scenario.get("thesis", "")).strip(),
+        }
+        cases.append(case)
+        if isinstance(probability, (int, float)):
+            if isinstance(expected_return, (int, float)):
+                has_return = True
+                weighted_return += float(probability) * float(expected_return)
+            if isinstance(score_delta, (int, float)):
+                weighted_score_delta += float(probability) * float(score_delta)
+    return {
+        "probability_total": probability_total,
+        "weighted_return": round(weighted_return, 4) if has_return else None,
+        "weighted_score_delta": round(weighted_score_delta, 2),
+        "cases": cases,
     }
 
 
@@ -345,6 +416,34 @@ def validate_input(data: DiligenceInput) -> list[InputQualityIssue]:
                     message="Add gross margin for this peer to compare profitability.",
                 )
             )
+    if data.scenarios:
+        scenarios = _normalize_scenarios(data.scenarios)
+        probability_total = _scenario_probability_total(scenarios)
+        if abs(probability_total - 1.0) > 0.01:
+            issues.append(
+                InputQualityIssue(
+                    severity="warning",
+                    path="scenarios",
+                    message="Scenario probabilities should sum to 100% for weighted analysis.",
+                )
+            )
+        for index, scenario in enumerate(scenarios):
+            if not isinstance(scenario.get("probability"), (int, float)):
+                issues.append(
+                    InputQualityIssue(
+                        severity="warning",
+                        path=f"scenarios[{index}].probability",
+                        message="Add a numeric scenario probability such as 25%.",
+                    )
+                )
+            if not isinstance(scenario.get("return"), (int, float)):
+                issues.append(
+                    InputQualityIssue(
+                        severity="warning",
+                        path=f"scenarios[{index}].return",
+                        message="Add an expected scenario return such as -20% or 35%.",
+                    )
+                )
     return issues
 
 
@@ -586,6 +685,8 @@ def score_profile(data: DiligenceInput) -> DiligenceProfile:
     peer_context = build_peer_context(data, revenue_growth, new_margin)
     catalyst_timeline = build_catalyst_timeline(data.catalysts)
     source_coverage = build_source_coverage(data)
+    scenario_analysis = build_scenario_analysis(data.scenarios)
+    score += scenario_analysis["weighted_score_delta"]
     bounded = max(0, min(100, round(score)))
     return DiligenceProfile(
         ticker=data.ticker.upper(),
@@ -601,6 +702,7 @@ def score_profile(data: DiligenceInput) -> DiligenceProfile:
         peer_context=peer_context,
         catalyst_timeline=catalyst_timeline,
         source_coverage=source_coverage,
+        scenario_analysis=scenario_analysis,
     )
 
 
@@ -617,6 +719,20 @@ def _quality_bullets(issues: list[dict[str, str]]) -> list[str]:
 def _markdown_cell(value: str) -> str:
     text = value.strip() or "—"
     return text.replace("|", "\\|")
+
+
+def _format_pct(value: Any) -> str:
+    if not isinstance(value, (int, float)):
+        return "—"
+    return f"{value:.0%}"
+
+
+def _format_number(value: Any) -> str:
+    if not isinstance(value, (int, float)):
+        return "—"
+    if float(value).is_integer():
+        return str(int(value))
+    return f"{value:g}"
 
 
 def _catalyst_table(timeline: list[dict[str, str]]) -> str:
@@ -668,6 +784,35 @@ def _source_coverage_bullets(source_coverage: dict[str, Any]) -> list[str]:
     return bullets
 
 
+def _scenario_table(scenario_analysis: dict[str, Any]) -> str:
+    cases = scenario_analysis.get("cases", [])
+    if not cases:
+        return "No scenarios supplied"
+    lines = [
+        f"Weighted expected return: {_format_pct(scenario_analysis.get('weighted_return'))}",
+        f"Weighted score delta: {_format_number(scenario_analysis.get('weighted_score_delta'))}",
+        f"Probability total: {_format_pct(scenario_analysis.get('probability_total'))}",
+        "",
+        "| Case | Probability | Return | Score delta | Thesis |",
+        "| --- | ---: | ---: | ---: | --- |",
+    ]
+    for case in cases:
+        lines.append(
+            "| "
+            + " | ".join(
+                [
+                    _markdown_cell(str(case.get("case", "case"))),
+                    _format_pct(case.get("probability")),
+                    _format_pct(case.get("return")),
+                    _format_number(case.get("score_delta")),
+                    _markdown_cell(str(case.get("thesis", ""))),
+                ]
+            )
+            + " |"
+        )
+    return "\n".join(lines)
+
+
 def build_note(data: DiligenceInput) -> str:
     profile = score_profile(data)
     catalyst_names = [_catalyst_name(catalyst) for catalyst in data.catalysts] or [
@@ -692,6 +837,9 @@ def build_note(data: DiligenceInput) -> str:
         "",
         "## Source coverage",
         _bullet(_source_coverage_bullets(profile.source_coverage)),
+        "",
+        "## Scenario analysis",
+        _scenario_table(profile.scenario_analysis),
         "",
         "### Strengths",
         _bullet(profile.strengths),

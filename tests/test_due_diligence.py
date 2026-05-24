@@ -706,6 +706,79 @@ class TickerDueDiligenceTests(unittest.TestCase):
         self.assertTrue(payload["has_errors"])
         self.assertTrue(any(issue["severity"] == "error" for issue in payload["issues"]))
 
+    def test_score_profile_includes_scenario_analysis_from_inline_scenarios(self):
+        data = DiligenceInput(
+            ticker="SCN",
+            thesis="Scenario math should frame the next-pass decision.",
+            financials=[
+                {"period": "2023", "revenue": 100, "gross_margin": 0.30, "fcf": 1},
+                {"period": "2024", "revenue": 120, "gross_margin": 0.35, "fcf": 2},
+            ],
+            kpis={"book_to_bill": "1.2x"},
+            catalysts=["earnings"],
+            risks=["execution"],
+            scenarios=[
+                {"case": "bear", "probability": "25%", "return": "-40%", "score_delta": -12},
+                {"case": "base", "probability": "50%", "return": "20%", "score_delta": 5},
+                {"case": "bull", "probability": "25%", "return": "80%", "score_delta": 12},
+            ],
+        )
+
+        profile = score_profile(data)
+        note = build_note(data)
+
+        self.assertEqual(profile.scenario_analysis["weighted_return"], 0.2)
+        self.assertEqual(profile.scenario_analysis["weighted_score_delta"], 2.5)
+        self.assertEqual(profile.scenario_analysis["probability_total"], 1.0)
+        self.assertEqual(profile.scenario_analysis["cases"][0]["case"], "bear")
+        self.assertIn("scenario_analysis", profile.to_dict())
+        self.assertIn("## Scenario analysis", note)
+        self.assertIn("| bear | 25% | -40% | -12 |", note)
+        self.assertIn("Weighted expected return: 20%", note)
+
+    def test_validate_input_warns_when_scenario_probabilities_do_not_sum_to_one(self):
+        data = DiligenceInput(
+            ticker="SCN",
+            thesis="Scenario probabilities should be auditable.",
+            scenarios=[
+                {"case": "base", "probability": "40%", "return": "10%"},
+                {"case": "bull", "probability": "40%", "return": "50%"},
+            ],
+        )
+
+        issue_dicts = [issue.to_dict() for issue in validate_input(data)]
+
+        self.assertIn(
+            {
+                "severity": "warning",
+                "path": "scenarios",
+                "message": "Scenario probabilities should sum to 100% for weighted analysis.",
+            },
+            issue_dicts,
+        )
+
+    def test_load_inputs_accepts_inline_scenarios(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            json_path = root / "input.json"
+            json_path.write_text(
+                json.dumps(
+                    {
+                        "ticker": "SCN",
+                        "thesis": "Scenario metadata should load from JSON.",
+                        "scenarios": [
+                            {"case": "base", "probability": "60%", "return": "15%"}
+                        ],
+                    }
+                )
+            )
+
+            loaded = load_inputs(json_path=json_path)
+
+        self.assertEqual(loaded.scenarios[0]["case"], "base")
+        self.assertEqual(loaded.scenarios[0]["probability"], 0.6)
+        self.assertEqual(loaded.scenarios[0]["return"], 0.15)
+
 
 if __name__ == "__main__":
     unittest.main()

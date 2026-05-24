@@ -70,3 +70,43 @@ This roadmap keeps the CLI focused on fast, local-first ticker diligence. Each p
 - Added `--notes-dir` so batch runs can still write one Markdown due-diligence note per valid ticker.
 - Preserved partial-failure reporting so malformed or incomplete files appear in `failures` without hiding valid ticker results.
 - Covered batch ranking, Markdown summary output, JSON CLI output, per-ticker note writing, and partial failures with tests.
+
+## Phase 6 — Scenario analysis and score sensitivity
+
+**Status:** Shipped
+
+**Goal:** Let users frame bull/base/bear or custom local scenarios and see weighted expected return plus score sensitivity without fetching live prices.
+
+**Shipped scope:**
+
+- Accepted inline `scenarios` with `case`, `probability`, `return`, optional `score_delta`, and optional `thesis` fields.
+- Normalized percent-style probabilities and returns from JSON inputs.
+- Added JSON `scenario_analysis` with normalized cases, probability total, weighted expected return, and weighted score delta.
+- Applied probability-weighted `score_delta` to the existing heuristic score while preserving the 0-100 score bounds.
+- Added warning-level input-quality issues when supplied scenario probabilities do not sum to 100% or scenario cases lack probability/return values.
+- Added a Markdown scenario analysis section with weighted summary lines and an auditable case table.
+- Covered inline scenario loading, profile/Markdown output, and probability-sum validation with tests.
+
+## Phase 7 — Portfolio exposure rollup
+
+**Status:** Planned
+
+**Goal:** Add optional local portfolio sizing context so watchlists can show sector/theme/risk concentration without connecting to brokerages.
+
+**Planned scope:**
+
+- Accept local position sizing metadata per ticker or from a CSV.
+- Summarize exposure by ticker, risk bucket, horizon, and user-supplied theme.
+- Surface watchlist concentration warnings without changing single-ticker defaults.
+
+## Phase 8 — Export-ready diligence packets
+
+**Status:** Planned
+
+**Goal:** Package Markdown/JSON outputs into shareable local artifacts for research review workflows.
+
+**Planned scope:**
+
+- Add a deterministic output directory layout for notes, profiles, watchlists, and source metadata.
+- Generate an index file linking each ticker note to its JSON profile and validation status.
+- Keep all exports local-only and reproducible from the supplied inputs.
