@@ -89,15 +89,18 @@ This roadmap keeps the CLI focused on fast, local-first ticker diligence. Each p
 
 ## Phase 7 — Portfolio exposure rollup
 
-**Status:** Planned
+**Status:** Shipped
 
 **Goal:** Add optional local portfolio sizing context so watchlists can show sector/theme/risk concentration without connecting to brokerages.
 
-**Planned scope:**
+**Shipped scope:**
 
-- Accept local position sizing metadata per ticker or from a CSV.
-- Summarize exposure by ticker, risk bucket, horizon, and user-supplied theme.
-- Surface watchlist concentration warnings without changing single-ticker defaults.
+- Accept local position sizing metadata per ticker via `--positions` CSV (ticker, weight, risk, horizon, theme).
+- Summarize exposure by risk bucket, horizon, and user-supplied theme with portfolio % breakdowns.
+- Surface concentration warnings when any theme, risk bucket, or single ticker exceeds 40% of total portfolio weight.
+- Include `portfolio_summary` in batch JSON output and a `## Portfolio exposure` section in Markdown watchlist output.
+- Preserved backward compatibility: no positions path means no portfolio summary, single-ticker mode unchanged.
+- Covered position parsing, portfolio aggregation, concentration warnings, and CLI integration with tests.
 
 ## Phase 8 — Export-ready diligence packets
 

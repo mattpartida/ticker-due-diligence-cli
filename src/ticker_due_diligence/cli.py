@@ -50,6 +50,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="CSV comparable-company peer table to merge into the input.",
     )
     parser.add_argument(
+        "--positions",
+        type=Path,
+        help="CSV file with position sizing columns (ticker, weight, risk, horizon, theme).",
+    )
+    parser.add_argument(
         "--output",
         type=Path,
         help="Markdown output path. Defaults to stdout for markdown.",
@@ -73,7 +78,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         if args.batch_dir:
-            batch = build_watchlist(args.batch_dir)
+            batch = build_watchlist(args.batch_dir, positions_path=args.positions)
             if args.notes_dir:
                 args.notes_dir.mkdir(parents=True, exist_ok=True)
                 for row in batch["watchlist"]:

@@ -90,7 +90,18 @@ JSON score profiles also include `scenario_analysis` when local scenario cases a
 
 Batch watchlists use `--batch-dir` to scan `*.json` ticker inputs, continue past bad files, and emit a ranked summary sorted by highest score then lower risk. Markdown output includes a summary table plus partial-failure section; JSON output includes `summary`, `watchlist`, and `failures`. Add `--notes-dir` to write one Markdown due-diligence note per valid ticker while still producing the batch summary.
 
-See [`docs/roadmap.md`](docs/roadmap.md) for the shipped input-quality phase and planned next phases.
+Add a positions CSV to see portfolio exposure rollup:
+
+```bash
+ticker-dd \\
+  --batch-dir examples/watchlist \\
+  --positions examples/positions.csv \\
+  --format json
+```
+
+`--positions` expects columns `ticker`, `weight`, `risk`, `horizon`, and optional `theme`. The CLI summarizes exposure by risk bucket, horizon, and theme, and emits concentration warnings when any single theme, risk bucket, or ticker exceeds 40% of total portfolio weight. JSON output includes a `portfolio_summary` section; Markdown output includes a `## Portfolio exposure` section. Single-ticker mode is unchanged when `--positions` is not supplied.
+
+See [`docs/roadmap.md`](docs/roadmap.md) for the shipped phases and planned next phases.
 
 ## JSON input shape
 

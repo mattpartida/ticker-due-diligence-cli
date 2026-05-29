@@ -886,7 +886,158 @@ def _risk_rank(risk: str) -> int:
     return {"low": 0, "medium": 1, "med": 1, "high": 2}.get(normalized, 3)
 
 
-def build_watchlist(input_dir: str | Path) -> dict[str, Any]:
+def parse_positions_csv(path: str | Path) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    with Path(path).open(newline="") as f:
+        reader = csv.DictReader(f)
+        for raw in reader:
+            row: dict[str, Any] = {}
+            for key, value in raw.items():
+                if key is None:
+                    continue
+                normalized_key = key.strip().lower().replace(" ", "_")
+                if normalized_key == "ticker" and value not in (None, ""):
+                    row[normalized_key] = str(value).strip().upper()
+                elif normalized_key == "weight":
+                    row[normalized_key] = _as_number(value)
+                elif normalized_key == "theme":
+                    theme_val = str(value).strip()
+                    row[normalized_key] = theme_val if theme_val else None
+                else:
+                    row[normalized_key] = str(value).strip() if value is not None else ""
+            rows.append(row)
+    return rows
+
+
+def build_portfolio_summary(positions: list[dict[str, Any]]) -> dict[str, Any]:
+    if not positions:
+        return {
+            "total_weight": 0.0,
+            "by_risk": [],
+            "by_horizon": [],
+            "by_theme": [],
+            "concentration_warnings": [],
+        }
+
+    total_weight = sum(float(p.get("weight", 0)) for p in positions)
+
+    # Aggregate by risk bucket
+    risk_map: dict[str, float] = {}
+    for p in positions:
+        bucket = str(p.get("risk", "unspecified")).strip().lower() or "unspecified"
+        risk_map[bucket] = risk_map.get(bucket, 0.0) + float(p.get("weight", 0))
+    by_risk = [
+        {
+            "risk": k,
+            "weight": round(v, 4),
+            "pct": round(v / total_weight, 4) if total_weight else 0.0,
+        }
+        for k, v in sorted(risk_map.items(), key=lambda x: -x[1])
+    ]
+
+    # Aggregate by horizon
+    horizon_map: dict[str, float] = {}
+    for p in positions:
+        bucket = str(p.get("horizon", "unspecified")).strip() or "unspecified"
+        horizon_map[bucket] = horizon_map.get(bucket, 0.0) + float(p.get("weight", 0))
+    by_horizon = [
+        {
+            "horizon": k,
+            "weight": round(v, 4),
+            "pct": round(v / total_weight, 4) if total_weight else 0.0,
+        }
+        for k, v in sorted(horizon_map.items(), key=lambda x: -x[1])
+    ]
+
+    # Aggregate by theme
+    theme_map: dict[str, float] = {}
+    for p in positions:
+        raw_theme = p.get("theme")
+        bucket = str(raw_theme).strip().lower() if raw_theme else "unclassified"
+        if not bucket:
+            bucket = "unclassified"
+        theme_map[bucket] = theme_map.get(bucket, 0.0) + float(p.get("weight", 0))
+    by_theme = [
+        {
+            "theme": k,
+            "weight": round(v, 4),
+            "pct": round(v / total_weight, 4) if total_weight else 0.0,
+        }
+        for k, v in sorted(theme_map.items(), key=lambda x: -x[1])
+    ]
+
+    # Concentration warnings
+    warnings: list[str] = []
+    CONCENTRATION_THRESHOLD = 0.40
+
+    for bucket in by_theme:
+        if bucket["pct"] > CONCENTRATION_THRESHOLD:
+            warnings.append(
+                f"Theme '{bucket['theme']}' is {bucket['pct']:.0%} of portfolio "
+                f"(above {CONCENTRATION_THRESHOLD:.0%} threshold)"
+            )
+
+    for bucket in by_risk:
+        if bucket["pct"] > CONCENTRATION_THRESHOLD:
+            warnings.append(
+                f"Risk bucket '{bucket['risk']}' is {bucket['pct']:.0%} of portfolio "
+                f"(above {CONCENTRATION_THRESHOLD:.0%} threshold)"
+            )
+
+    # Per-ticker concentration
+    for p in positions:
+        w = float(p.get("weight", 0))
+        if total_weight and w / total_weight > CONCENTRATION_THRESHOLD:
+            warnings.append(
+                f"Ticker '{p.get('ticker', '?')}' is {w / total_weight:.0%} of portfolio "
+                f"(above {CONCENTRATION_THRESHOLD:.0%} threshold)"
+            )
+
+    return {
+        "total_weight": round(total_weight, 4),
+        "by_risk": by_risk,
+        "by_horizon": by_horizon,
+        "by_theme": by_theme,
+        "concentration_warnings": warnings,
+    }
+
+
+def _portfolio_summary_markdown(summary: dict[str, Any]) -> str:
+    if not summary or not summary.get("total_weight"):
+        return "No portfolio positions supplied."
+
+    lines = [
+        f"Total position weight: {summary['total_weight']:.0%}",
+        "",
+        "### By risk bucket",
+        "| Risk | Weight | Portfolio % |",
+        "| --- | ---: | ---: |",
+    ]
+    for bucket in summary["by_risk"]:
+        lines.append(f"| {bucket['risk']} | {bucket['weight']:.0%} | {bucket['pct']:.0%} |")
+
+    lines.extend(
+        ["", "### By horizon", "| Horizon | Weight | Portfolio % |", "| --- | ---: | ---: |"]
+    )
+    for bucket in summary["by_horizon"]:
+        lines.append(f"| {bucket['horizon']} | {bucket['weight']:.0%} | {bucket['pct']:.0%} |")
+
+    lines.extend(["", "### By theme", "| Theme | Weight | Portfolio % |", "| --- | ---: | ---: |"])
+    for bucket in summary["by_theme"]:
+        lines.append(f"| {bucket['theme']} | {bucket['weight']:.0%} | {bucket['pct']:.0%} |")
+
+    warnings = summary.get("concentration_warnings", [])
+    if warnings:
+        lines.extend(["", "### Concentration warnings", ""])
+        for w in warnings:
+            lines.append(f"- ⚠️ {w}")
+
+    return "\n".join(lines)
+
+
+def build_watchlist(
+    input_dir: str | Path, *, positions_path: str | Path | None = None
+) -> dict[str, Any]:
     root = Path(input_dir)
     if not root.is_dir():
         raise ValueError(f"batch directory does not exist: {root}")
@@ -914,7 +1065,7 @@ def build_watchlist(input_dir: str | Path) -> dict[str, Any]:
         )
     rows.sort(key=lambda row: (-int(row["score"]), _risk_rank(str(row["risk"])), row["ticker"]))
     ranked_rows = [{"rank": index, **row} for index, row in enumerate(rows, start=1)]
-    return {
+    result: dict[str, Any] = {
         "summary": {
             "input_dir": str(root),
             "total_files": len(files),
@@ -924,6 +1075,10 @@ def build_watchlist(input_dir: str | Path) -> dict[str, Any]:
         "watchlist": ranked_rows,
         "failures": failures,
     }
+    if positions_path:
+        positions = parse_positions_csv(positions_path)
+        result["portfolio_summary"] = build_portfolio_summary(positions)
+    return result
 
 
 def build_watchlist_markdown(batch: dict[str, Any]) -> str:
@@ -962,5 +1117,11 @@ def build_watchlist_markdown(batch: dict[str, Any]) -> str:
         lines.extend(["", "## Partial failures", ""])
         for failure in failures:
             lines.append(f"- {failure['file']}: {failure['error']}")
+
+    portfolio_summary = batch.get("portfolio_summary")
+    if portfolio_summary:
+        lines.extend(["", "## Portfolio exposure", ""])
+        lines.append(_portfolio_summary_markdown(portfolio_summary))
+
     lines.append("")
     return "\n".join(lines)

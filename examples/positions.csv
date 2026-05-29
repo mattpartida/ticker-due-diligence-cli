@@ -1,0 +1,7 @@
+ticker,weight,risk,horizon,theme
+AAPL,15%,medium,1-2y,tech
+MSFT,15%,low,1-2y,tech
+XOM,15%,high,3-5y,energy
+JNJ,10%,low,1-2y,healthcare
+BRK,10%,low,3-5y,finance
+CASH,35%,low,unspecified,unclassified

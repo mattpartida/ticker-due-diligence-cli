@@ -9,3 +9,4 @@
 - Ship Phase 4 source/evidence traceability with user-supplied `sources`, per-field `evidence` paths, JSON/Markdown source coverage summaries, and warnings for unsupported KPIs, catalysts, and risks.
 - Ship Phase 5 batch watchlist scoring with `--batch-dir`, Markdown/JSON ranked summaries, `--notes-dir` per-ticker note generation, and partial-failure reporting.
 - Ship Phase 6 scenario analysis with inline `scenarios`, weighted expected return / score-delta output, probability-sum validation warnings, and Markdown scenario tables.
+- Ship Phase 7 portfolio exposure rollup with `--positions` CSV support, risk/horizon/theme exposure breakdowns, concentration warnings at 40% threshold, and `portfolio_summary` in batch JSON/Markdown output.
